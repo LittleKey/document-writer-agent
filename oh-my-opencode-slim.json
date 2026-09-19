@@ -1,0 +1,87 @@
+{
+  "$schema": "https://unpkg.com/oh-my-opencode-slim@latest/oh-my-opencode-slim.schema.json",
+  "agents": {
+    "document-writer": {
+      "inheritModelFrom": "session",
+      "skills": [
+        "maintaining-product-engineering-docs",
+        "domain-modeling",
+        "humanizer"
+      ],
+      "mcps": [],
+      "description": "Use for bounded creation or editing of product and engineering documents after the target, scope, protected content, confirmed facts, and acceptance criteria are known.",
+      "orchestratorPrompt": "For bounded local document work — or Lark document-body editing only when the user has explicitly opted in to writer-side Lark editing and compatible writer-side skills are installed — dispatch document-writer after specifying target, scope, locator, protected content, confirmed facts, and acceptance criteria. After it writes and rereads, always dispatch oracle to review. Return Critical or Important findings to the same document-writer, then use the same oracle for rereview before claiming completion.",
+      "permission": {
+        "task": "deny",
+        "question": "deny",
+        "webfetch": "deny",
+        "websearch": "deny",
+        "gh_grep_*": "deny",
+        "context7_*": "deny"
+      }
+    },
+    "lark-operator": {
+      "inheritModelFrom": "session",
+      "skills": [],
+      "mcps": [],
+      "description": "Use for all Feishu/Lark reads and operations except formal product and engineering document content: writer-side Lark body editing happens only in document-writer under explicit user opt-in and is unavailable otherwise — never through lark-operator.",
+      "orchestratorPrompt": "Delegate every independent Feishu/Lark read or operation to lark-operator. Route formal product or engineering document body creation and editing to document-writer only when the user has explicitly opted in to writer-side Lark editing and compatible writer-side skills are installed; without that opt-in such editing is unavailable and must not be routed through lark-operator. The writer may read its target and reread after writing. For high-risk or external actions, require explicit user authorization and Oracle review before execution; return Critical or Important findings to the same lark-operator and use the same Oracle for rereview. Run listeners only in the background with timeout, max-events, and an explicit termination condition. Do not invoke lark-* Skills directly.",
+      "permission": {
+        "bash": "allow",
+        "read": "allow",
+        "glob": "allow",
+        "grep": "allow",
+        "edit": "deny",
+        "write": "deny",
+        "apply_patch": "deny",
+        "ast_grep_replace": "deny",
+        "task": "deny",
+        "question": "deny",
+        "webfetch": "deny",
+        "websearch": "deny",
+        "gh_grep_*": "deny",
+        "context7_*": "deny"
+      }
+    },
+    "oracle": {
+      "skills_add": [
+        "document-review-evidence"
+      ]
+    },
+    "orchestrator": {
+      "skills_remove": [
+        "document-review-evidence",
+        "humanizer",
+        "use-modern-go",
+        "lark-approval",
+        "lark-apps",
+        "lark-attendance",
+        "lark-base",
+        "lark-calendar",
+        "lark-contact",
+        "lark-doc",
+        "lark-drive",
+        "lark-event",
+        "lark-im",
+        "lark-mail",
+        "lark-markdown",
+        "lark-meeting",
+        "lark-minutes",
+        "lark-note",
+        "lark-okr",
+        "lark-openapi-explorer",
+        "lark-shared",
+        "lark-sheets",
+        "lark-skill-maker",
+        "lark-slides",
+        "lark-task",
+        "lark-vc",
+        "lark-vc-agent",
+        "lark-whiteboard",
+        "lark-wiki",
+        "lark-workflow-meeting-summary",
+        "lark-workflow-standup-report"
+      ]
+    }
+  }
+}
