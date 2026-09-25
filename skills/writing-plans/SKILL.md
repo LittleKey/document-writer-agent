@@ -1,162 +1,63 @@
 ---
 name: writing-plans
-description: Use when you have a spec or requirements for a multi-step task, before touching code
+description: Use when you are the workflow owner (typically the Orchestrator) and need to structure a multi-step task into a work plan — a work graph of tasks, dependencies, owners, deliverables, and acceptance criteria — before executing it
 ---
 
 # Writing Plans
 
 ## Overview
 
-Write a self-contained implementation plan from the requirements and confirmed context the Orchestrator supplies. The plan must let an engineer with zero context on this task carry it out: goal, scope, requirements, relevant code, the concrete changes for each task, dependencies between tasks, and how each deliverable is verified. The plan describes implementation — it does not perform it. DRY. YAGNI.
+Turn requirements and confirmed context into a work graph owned and maintained by the Orchestrator. The plan describes the work; execution follows separately. DRY. YAGNI.
 
-**Save plans to:** the target path the Orchestrator supplies for this task. Use `docs/plans/YYYY-MM-DD-<feature-name>.md` only when the Orchestrator explicitly authorizes that default; otherwise return `NEEDS_CONTEXT`. User preferences for plan location override the authorized default.
+**Default output: a short work graph, not a long document.** For most tasks the whole plan fits in the Orchestrator's Todo/working notes:
 
-## Scope Check
+- **Goal** — one sentence.
+- **Scope** — what is in, what is explicitly out.
+- **Tasks** — each task is the smallest unit that carries its own verification cycle and stands or falls on its own.
+- **Dependencies** — what each task consumes from earlier tasks or existing code; what it produces for later tasks (exact interfaces/signatures so tasks stay self-contained).
+- **Owners** — which agent/lane executes each task.
+- **Deliverables** — what each task produces.
+- **Acceptance** — how each deliverable is verified (the concrete check, not a vague "test it").
 
-If the supplied requirements cover multiple independent subsystems, propose breaking this into separate plans — one per independent deliverable — to the Orchestrator, and only when each plan would produce working, verifiable software on its own. The Orchestrator decides the split; do not split on your own initiative.
+Persist a plan to a file (`docs/plans/...` or the path the Orchestrator chooses) **only** when a durable handoff is genuinely required — e.g. handing off to a long-running process, or the task is large enough that context alone cannot hold it. Simple tasks do not trigger the full template. Persisting to a file does not change the plan's nature: it remains internal execution state, not a document deliverable. If the user requires a formal plan document for human readers, produce it directly from the internal plan as the Orchestrator's own work product — plan authoring does not enter document-writer's scope. For long-running tasks, prefer the existing `.slim/deepwork/` state mechanism; file location or directory name never determines whether a plan is internal state or a formal deliverable.
 
-## File Structure
+## Task decomposition
 
-Before defining tasks, map out which files will be created or modified and what each one is responsible for.
+- Design units with clear boundaries and well-defined interfaces; each file/unit has one clear responsibility.
+- Fold setup, configuration, scaffolding, and documentation steps into the task whose deliverable needs them; split only where one task could fail verification while its neighbor passes.
+- In existing codebases, follow established patterns. Label what the requirements already fix as confirmed; label your own choices as proposals to confirm.
 
-- Design units with clear boundaries and well-defined interfaces. Each file should have one clear responsibility.
-- Files that change together should live together. Split by responsibility, not by technical layer.
-- In existing codebases, follow established patterns. Do not propose splitting a file merely because it is large; propose a split only when a concrete change requires it or the boundaries are unclear.
-- Label design choices accordingly: what the supplied requirements or existing code already fixes is stated as confirmed; what you choose while authoring the plan is a proposal for the Orchestrator to confirm.
+## Step granularity
 
-This structure informs the task decomposition. Each task should produce self-contained changes that make sense independently.
+Each step is one concrete, checkable action sized to its deliverable, not a fixed time budget — e.g. "write the failing test / run it to make sure it fails / implement the minimal code / run the tests and make sure they pass". Adapt the cycle to the deliverable's real verification (a config change might be "edit file" + "reload and probe"). Every task ends in concrete, checkable verification.
 
-## Task Right-Sizing
+## Detail level
 
-A task is the smallest unit that carries its own verification cycle and stands or falls on its own. When drawing task boundaries: fold setup, configuration, scaffolding, and documentation steps into the task whose deliverable needs them; split only where one task could fail verification while its neighbor passes. Each task ends with an independently verifiable deliverable.
+Pin down behavior, interfaces, constraints, and acceptance criteria precisely. Include code **only where it removes ambiguity** — key algorithms, tricky logic, exact signatures a later task depends on. Do not force-write every line of implementation up front; for existing functions a precise reference by path and symbol is enough. Commands and expected outcomes in verification steps must match the target project's actual tooling.
 
-## Step Granularity
+## No placeholders
 
-**Each step is one concrete, checkable action, sized to its deliverable — not a fixed time budget:**
-- "Write the failing test" - step
-- "Run it to make sure it fails" - step
-- "Implement the minimal code to make the test pass" - step
-- "Run the tests and make sure they pass" - step
+These are plan failures — never write them:
 
-The test-first cycle above is illustrative, not mandatory. Adapt the cycle to the deliverable's real verification (a doc change might be "edit section" + "link check"; a config change "edit file" + "reload and probe"). Every task still ends in concrete, checkable verification.
-
-## Plan Document Header
-
-**Default header template for new plans.** When revising or extending an existing plan, preserve its supplied structure instead of re-templating.
-
-```markdown
-# [Feature Name] Implementation Plan
-
-> Steps use checkbox (`- [ ]`) syntax for tracking.
-
-**Goal:** [One sentence describing what this builds]
-
-**Architecture:** [2-3 sentences about approach]
-
-**Tech Stack:** [Key technologies/libraries]
-
-**Requirements:** [path(s) to the supplied requirements, spec, or source
-docs this plan implements — the plan argues from them, so they travel
-with it; whoever implements reads both. If no document was supplied,
-cite the dispatch and its confirmed context.]
-
-## Global Constraints
-
-[Project-wide requirements from the supplied requirements or spec —
-version floors, dependency limits, naming and copy rules, platform
-requirements — one line each, with exact values copied verbatim. Every
-task's requirements implicitly include this section.]
-
-## Review Focus
-
-[The material risks or failure modes the requirements imply but no
-task's verification exercises — one line each, naming the input,
-condition, or interaction and the behavior a reasonable person would
-expect, most likely first. Requirements say what the software must do,
-not everything it will meet, and their silence on an input is not
-permission for that input to break the program. Write the list here,
-once, with the requirements in front of you. Then, for each line, link
-it to the task and verification that covers it.]
-
----
-```
-
-## Task Structure
-
-````markdown
-### Task N: [Component Name]
-
-**Files:**
-- Create: `exact/path/to/file.py`
-- Modify: `exact/path/to/existing.py:123-145`
-- Test: `tests/exact/path/to/test.py`
-
-**Interfaces:**
-- Consumes: [what this task uses from earlier tasks or existing code —
-  exact signatures; for existing code, reference by path and symbol]
-- Produces (proposed): [what later tasks rely on — exact function
-  names, parameter and return types, so each task is self-contained
-  and signatures stay consistent across tasks]
-
-- [ ] **Step 1: Write the failing test**
-
-```python
-def test_specific_behavior():
-    result = function(input)
-    assert result == expected
-```
-
-- [ ] **Step 2: Run test to verify it fails**
-
-Run: `pytest tests/path/test.py::test_name -v`
-Expected: FAIL with "function not defined"
-
-- [ ] **Step 3: Write minimal implementation**
-
-```python
-def function(input):
-    return expected
-```
-
-- [ ] **Step 4: Run test to verify it passes**
-
-Run: `pytest tests/path/test.py::test_name -v`
-Expected: PASS
-````
-
-The test-first pattern and filenames above are illustrative: keep the
-template's Files, Interfaces, and step style as the default structure for
-new plans, but commands, expected outcomes, and example code must match
-the target project's actual tooling and conventions. Steps must always
-show the actual content — code blocks for code steps, exact commands and
-expected outcomes for verification steps — for whatever the deliverable
-requires.
-
-## No Placeholders
-
-Every step must contain the precise content an engineer needs. These are **plan failures** — never write them:
 - "TBD", "TODO", "implement later", "fill in details"
 - "Add appropriate error handling" / "add validation" / "handle edge cases"
 - "Write tests for the above" (without what the tests must verify)
-- "Similar to Task N" without the exact differences (name what is shared and what changes)
+- "Similar to Task N" without the exact differences
 - Steps that describe what to do without the details needed to check the result
 
-Pin down exact behavior, inputs, outputs, symbols, file paths, and acceptance criteria for every step. Include code where it removes ambiguity; for existing types, functions, or definitions, a precise reference by path and symbol is enough — do not restate code that already exists. If a step depends on a required decision that was not supplied and cannot be derived from confirmed context, stop and return `NEEDS_CONTEXT` rather than inventing one.
+If a step depends on a required decision that was not supplied and cannot be derived from confirmed context, stop and surface the gap rather than inventing one.
 
-## Self-Review
+## Self-check
 
-After writing the complete plan, reread it with fresh eyes and check it against the supplied requirements. This is a checklist you run yourself.
+Before executing, run this checklist on your own plan:
 
-**1. Requirements coverage:** Skim each requirement in the supplied requirements. Can you point to a task that implements it? List any gaps.
+1. **Coverage:** can you point each requirement to a task that implements it? List gaps.
+2. **Placeholder scan:** any red flag from "No placeholders" above.
+3. **Consistency:** do interfaces/signatures later tasks use match what earlier tasks defined? A function called `clearLayers()` in Task 3 but `clearFullLayers()` in Task 7 is a bug.
+4. **Verification:** does every task end in a concrete check, and does every material risk have a task whose verification exercises it?
 
-**2. Placeholder scan:** Search your plan for red flags — any of the patterns from the "No Placeholders" section above. Fix them.
+Fix issues found. If the plan is large, re-read it as saved and rerun the affected checks against the file.
 
-**3. Type consistency:** Do the types, method signatures, and property names you used in later tasks match what you defined in earlier tasks? A function called `clearLayers()` in Task 3 but `clearFullLayers()` in Task 7 is a bug.
+## Execution
 
-**4. Review Focus:** For each risk or failure mode the requirements imply, is there a task whose verification exercises it? The uncovered ones most likely to bite a person go in the Review Focus section, and each line there is linked to the task and verification that covers it. An empty section means you checked and found none, not that you skipped the check.
-
-If you find issues, fix them, save, then reread the saved document and rerun the affected checks against the file as saved. If you find a requirement with no task, add the task. This self-review is a quality pass on your own work; it does not replace Oracle review of the returned artifact and evidence.
-
-## Artifact Delivery
-
-After saving and self-reviewing the plan, return the artifact through the existing writer result/evidence contract: the saved plan path, a concise outcome summary, the material changes with locations, verification actually performed, and any review evidence that contract requires. Do not dispatch reviewers, do not select or announce an execution method, and do not begin implementing the plan — the Orchestrator owns assignment, scope, decisions, review routing, quality gates, and execution.
+The Orchestrator drives the plan through dependency-based dispatch, Todo tracking, and updates based on verified facts (see `executing-plans`). High-risk design decisions may receive an independent Oracle review.
