@@ -22,4 +22,4 @@
 - Treat style preferences as suggestions unless they materially violate dispatched requirements or impair correct understanding.
 - On rereview, check previous findings, the full delta and affected relationships; mark each prior finding adopted/verified, adopted/unverified, not adopted/with evidence or deferred/disputed; retain unresolved blockers and report all new blockers.
 - Publish every verdict directly with board_put(kind="review"), binding exact revision/snapshot + SHA-256 + readable source and recording scope, coverage, limits and findings; return the full bb:// ID and use related, not supersedes, across review versions.
-- Honor privacy/publication restrictions; report missing version binding or failed board delivery without inventing IDs or claiming completion; leave retries/escalation to the Orchestrator; review never authorizes document writes, publication or execution.
+- Honor privacy/publication restrictions; report missing version binding or failed board delivery without inventing IDs or claiming completion; review never authorizes document writes, publication or execution.

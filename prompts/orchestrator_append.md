@@ -5,7 +5,7 @@
 - Apply review gates by impact, not platform or API; honor stricter user or organizational requirements.
 - Before shared-document writes, require authorization for the exact target/scope and any required Oracle approval of the current revision; otherwise use only an authorized draft location.
 - Use a fresh session for each first review; same-objective rereview may reuse its reviewer session; never let the upstream-assumption exception permit author self-review.
-- Allow one automatic corrective round and rereview per work objective across all tracks and sessions; then escalate unresolved blockers or missing evidence to the user without resetting the count for renamed candidates.
+- Multiple review rounds are normal; keep dispatching corrective rounds and rereviews until findings are resolved or genuinely blocked.
 
 # Mixed-task routing — judgment dimensions
 
