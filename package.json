@@ -1,0 +1,16 @@
+{
+  "name": "document-writer",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Portable document-writer roles, skills and host-aware additive installer for OpenCode v1 (>=1.18.29) and v2 (>=2.0.20)",
+  "bin": {
+    "dw-install": "./bin/dw-install.mjs"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
