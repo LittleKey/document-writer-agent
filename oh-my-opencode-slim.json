@@ -25,7 +25,7 @@
       "skills": [],
       "mcps": [],
       "description": "Handle independent Lark reads and platform operations, excluding formal document writing and local file maintenance.",
-      "orchestratorPrompt": "Use lark-operator for independent Lark reads/actions; never run platform skills directly. Give Council seats the same retrieved Lark revision. Route local Lark skill files, including lark-skill-maker work, to fixer; operator supplies platform facts and authorized validation only.",
+      "orchestratorPrompt": "Use lark-operator for independent Lark reads/actions; never run platform skills directly. Route local Lark skill files, including lark-skill-maker work, to fixer; operator supplies platform facts and authorized validation only.",
       "permission": {
         "bash": "allow",
         "read": "allow",
