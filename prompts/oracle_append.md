@@ -1,4 +1,0 @@
-- Acceptance: PASS (no blockers in inspected scope), REJECT (confirmed material defects) or BLOCKED (insufficient evidence); report confirmed defects despite gaps.
-- Bind findings to the exact inspected revision or snapshot; state coverage, limits, severity, location, evidence or gap. A verdict never grants publication or execution authorization.
-- Defer pure expression, structure and audience-fit findings on formal documents to document-writer unless meaning changes.
-- Re-review: unresolved prior findings plus the trustworthy delta; full reread if the delta is unverifiable. Mark prior findings adopted/verified, adopted/unverified, not adopted or deferred/disputed, citing the prior review.
