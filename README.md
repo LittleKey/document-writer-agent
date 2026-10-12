@@ -32,11 +32,13 @@ installer/                 Renderer (per-host permission vocabulary), merge, det
 prompts/
   document-writer.md       document-writer agent prompt (prompt authority for the installed native agent file)
   lark-operator.md         lark-operator agent prompt (prompt authority for the installed native agent file)
-skills/                    4 complete skill directories copied verbatim; no lark-* skills are vendored
+skills/                    3 complete skill directories copied verbatim; no lark-* skills are vendored
 test/install.test.mjs      Fixture suite + optional live-host effective-profile checks (DW_V1_BIN / DW_V2_BIN)
 package.json               npm metadata (v2.0.0; bin: dw-install; test: node --test)
 README.md / INSTALL.md / SOURCES.md / .gitignore
 ```
+
+The retired `writing-plans` skill is no longer bundled (approved removal of the two personal plan skills, 2026-10-11) — the package ships the three skill directories above. Reinstalling over an older four-skill installation does **not** delete its already-installed `writing-plans` copy; the upgrade behavior and the ownership-aware removal path are documented in [INSTALL.md §4](INSTALL.md#4-reversal).
 
 ## Requirements
 

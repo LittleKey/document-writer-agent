@@ -125,7 +125,7 @@ test("renderPlan: v1 vs v2 native vocabulary and layout", () => {
   }
 
   // skills land in host-native dirs, byte-for-byte
-  assert.ok(v1.skillIds.length >= 4, "expected at least the four bundled skills");
+  assert.ok(v1.skillIds.length >= 3, "expected at least the three bundled skills");
   assert.deepEqual(v1.skillIds, v2.skillIds);
   for (const f of v1.files.filter((x) => x.kind === "skill")) {
     assert.ok(f.path.startsWith(".opencode/skill/"), f.path);
@@ -158,7 +158,8 @@ for (const host of HOSTS) {
       for (const role of ROLES) {
         assert.ok(existsSync(join(target, agentDir, `${role}.md`)), `${agentDir}/${role}.md installed`);
       }
-      assert.ok(existsSync(join(target, skillDir, "writing-plans", "SKILL.md")));
+      assert.ok(existsSync(join(target, skillDir, "domain-modeling", "SKILL.md")));
+      assert.ok(!existsSync(join(target, skillDir, "writing-plans")), "retired writing-plans skill must not be installed");
 
       // overlay: managed keys added, unrelated keys untouched
       const overlay = JSON.parse(readFileSync(join(target, ".opencode", "oh-my-opencode-slim.json"), "utf8"));
@@ -171,10 +172,10 @@ for (const host of HOSTS) {
       assert.equal(manifest.schemaVersion, 1);
       assert.equal(manifest.host.flavor, host);
       assert.equal(manifest.package.baseline, BASELINE);
-      assert.ok(manifest.files.length >= 2 + 4, "manifest covers role agents + skills");
+      assert.ok(manifest.files.length >= 2 + 3, "manifest covers role agents + skills");
       assert.ok(manifest.files.every((f) => f.path && f.action && f.sha256Installed));
       assert.equal(manifest.promptAuthority[ROLES[0]], `${agentDir}/${ROLES[0]}.md`);
-      assert.deepEqual(manifest.skills.sort(), ["domain-modeling", "humanizer", "maintaining-product-engineering-docs", "writing-plans"]);
+      assert.deepEqual(manifest.skills.sort(), ["domain-modeling", "humanizer", "maintaining-product-engineering-docs"]);
 
       const check = verify({ target });
       assert.equal(check.drift.length, 0);
@@ -201,6 +202,8 @@ for (const host of HOSTS) {
       );
       assert.ok(manifest.files.every((f) => f.action === "unchanged"), "all entries unchanged on rerun");
       assert.ok(!manifest.files.some((f) => f.backup), "no backups on clean rerun");
+      const skillDir = host === "v1" ? ".opencode/skill" : ".opencode/skills";
+      assert.ok(!existsSync(join(target, skillDir, "writing-plans")), "reinstall cannot restore the retired writing-plans skill");
     } finally {
       rmSync(target, { recursive: true, force: true });
     }
@@ -309,7 +312,7 @@ for (const host of HOSTS) {
       assert.ok(!existsSync(join(target, agentDir, "document-writer.md")));
 
       // installed skills gone, owner skills untouched
-      assert.ok(!existsSync(join(target, skillDir, "writing-plans")), "installed skill dir pruned");
+      assert.ok(!existsSync(join(target, skillDir, "domain-modeling")), "installed skill dir pruned");
       const personalSkill = host === "v1" ? join(".opencode", "skill", "personal-skill") : join(".opencode", "skills", "personal-v2-skill");
       assert.ok(existsSync(join(target, personalSkill, "SKILL.md")), "owner skill preserved");
       // empty host skill dir pruned only if the installer created it
