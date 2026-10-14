@@ -14,10 +14,10 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/LittleKey/document-writer-agent.git"
+    "url": "git+https://github.com/LittleKey/omo-coworkers.git"
   },
-  "homepage": "https://github.com/LittleKey/document-writer-agent#readme",
-  "bugs": "https://github.com/LittleKey/document-writer-agent/issues",
+  "homepage": "https://github.com/LittleKey/omo-coworkers#readme",
+  "bugs": "https://github.com/LittleKey/omo-coworkers/issues",
   "bin": {
     "coworkers-install": "./bin/coworkers-install.mjs",
     "dw-install": "./bin/coworkers-install.mjs"
