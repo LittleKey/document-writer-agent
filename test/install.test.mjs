@@ -375,6 +375,162 @@ for (const host of HOSTS) {
   });
 }
 
+// --- rollback drift gating (recorded installed hashes) --------------------------
+// Rollback and the uninstall backup-restore path compare current bytes against
+// the installed hash recorded at install time and refuse to overwrite
+// post-install edits (INSTALL.md §3-§4).
+
+for (const host of HOSTS) {
+  test(`${host}: rollback blocks a file hand-edited after install; clean rollback is byte-exact`, async () => {
+  const target = makeTarget();
+  try {
+    const agentDir = host === "v1" ? ".opencode/agent" : ".opencode/agents";
+    await install({ packageRoot: REPO_ROOT, target, host });
+    const manifest = manifestMod.readManifest(target);
+    assert.ok(manifest.files.every((f) => typeof f.sha256Installed === "string"), "install records an installed hash per file");
+
+    // (a) hand-edit an installed file after install
+    const skillDir = host === "v1" ? ".opencode/skill" : ".opencode/skills";
+    const rel = `${skillDir}/domain-modeling/SKILL.md`;
+    const edited = "---\nname: domain-modeling\n---\nowner edit after install\n";
+    writeFileSync(join(target, rel), edited);
+
+    const result = rollback({ target });
+    assert.ok(result.blocked.includes(rel), "drifted file blocks its own restore");
+    assert.equal(readFileSync(join(target, rel)).toString(), edited, "drifted file left byte-untouched");
+    assert.ok(manifestMod.readManifest(target), "manifest retained while reconciliation is pending");
+    assert.ok(existsSync(join(target, ".opencode", "document-writer-backup")), "backup records retained for later reconciliation");
+
+    // clean paths still roll back around the blocked one
+    assert.ok(result.deleted.some((p) => p.startsWith(agentDir)), "unrelated created files still deleted");
+    assert.ok(!existsSync(join(target, agentDir, "document-writer.md")));
+
+    // (b) once the owner reconciles, rollback completes and removes its records
+    rmSync(join(target, rel));
+    const result2 = rollback({ target });
+    assert.equal(result2.blocked.length, 0, "rollback completes after reconciliation");
+    assert.ok(!existsSync(join(target, ".opencode", "document-writer-install.json")), "manifest removed by completed rollback");
+    const overlay = JSON.parse(readFileSync(join(target, ".opencode", "oh-my-opencode-slim.json"), "utf8"));
+    assert.ok(overlay.agents["personal-reviewer"], "owner overlay content untouched by rollback");
+  } finally {
+    rmSync(target, { recursive: true, force: true });
+  }
+});
+
+test(`${host}: rollback restores pre-install bytes byte-exact for backed-up files`, async () => {
+  const target = makeTarget();
+  try {
+    const agentDir = host === "v1" ? ".opencode/agent" : ".opencode/agents";
+    const roleRel = `${agentDir}/lark-operator.md`;
+    const original = "---\ndescription: owner pre-install role\n---\noriginal body\n";
+    writeFileSync(join(target, roleRel), original);
+
+    await assert.rejects(() => install({ packageRoot: REPO_ROOT, target, host }), ConflictError);
+    const { manifest } = await install({ packageRoot: REPO_ROOT, target, host, force: true });
+    const rec = manifest.files.find((f) => f.path === roleRel);
+    assert.equal(rec.action, "replace");
+    assert.equal(rec.sha256Before, sha256(Buffer.from(original)), "pre-install hash recorded at backup time");
+
+    const rb = rollback({ target });
+    assert.equal(rb.blocked.length, 0);
+    assert.ok(rb.restored.includes(roleRel), "backed-up role file restored");
+    assert.equal(readFileSync(join(target, roleRel)).toString(), original, "restored bytes are the exact pre-install content");
+  } finally {
+    rmSync(target, { recursive: true, force: true });
+  }
+});
+
+test(`${host}: legacy manifest without hash fields rolls back with an explicit warning`, async () => {
+  const target = makeTarget();
+  try {
+    const agentDir = host === "v1" ? ".opencode/agent" : ".opencode/agents";
+    // a backed-up (force-replaced) file exercises the restore-with-warning path
+    const roleRel = `${agentDir}/lark-operator.md`;
+    writeFileSync(join(target, roleRel), "---\ndescription: owner role\n---\nbody\n");
+    await install({ packageRoot: REPO_ROOT, target, host, force: true });
+
+    // simulate a manifest from a schemaVersion 1 era without recorded hashes
+    const manifest = manifestMod.readManifest(target);
+    const strip = ({ sha256Installed, ...rest }) => rest;
+    manifestMod.writeManifest(target, {
+      ...manifest,
+      files: manifest.files.map(strip),
+      overlay: manifest.overlay ? strip(manifest.overlay) : undefined,
+    });
+    assert.ok(manifestMod.readManifest(target).files.every((f) => f.sha256Installed === undefined));
+
+    // hand-edit the backed-up file: legacy rollback cannot detect this, says so, and restores anyway
+    writeFileSync(join(target, roleRel), "---\ndescription: owner edit\n---\nedited body\n");
+    const result = rollback({ target });
+    assert.equal(result.blocked.length, 0, "legacy manifest cannot drift-block");
+    assert.ok(
+      result.warnings.some((w) => w.includes(roleRel) && w.includes("no installed hash")),
+      "warning names the path whose drift could not be verified",
+    );
+    assert.equal(readFileSync(join(target, roleRel)).toString(), "---\ndescription: owner role\n---\nbody\n", "backup bytes restored despite the warning");
+    assert.ok(!existsSync(join(target, ".opencode", "document-writer-install.json")), "legacy rollback still completes");
+  } finally {
+    rmSync(target, { recursive: true, force: true });
+  }
+});
+
+test(`${host}: uninstall restores --force backups only when bytes match the install-time record`, async () => {
+  const target = makeTarget();
+  try {
+    const agentDir = host === "v1" ? ".opencode/agent" : ".opencode/agents";
+    const roleRel = `${agentDir}/document-writer.md`;
+    const preInstall = "---\ndescription: owner role\n---\npre-install body\n";
+    writeFileSync(join(target, roleRel), preInstall);
+    await install({ packageRoot: REPO_ROOT, target, host, force: true });
+    const installedBytes = readFileSync(join(target, roleRel));
+
+    const edited = "---\ndescription: owner fork post-install\n---\nnew body\n";
+    writeFileSync(join(target, roleRel), edited);
+    const result = uninstall({ target });
+    assert.ok(result.kept.some((k) => k.path === roleRel), "drifted file kept, backup not restored over it");
+    assert.equal(readFileSync(join(target, roleRel)).toString(), edited, "post-install edit preserved");
+    assert.ok(manifestMod.readManifest(target), "manifest retained while the kept file is pending");
+
+    // once the owner reverts the bytes to the installed content, the backup is restored
+    writeFileSync(join(target, roleRel), installedBytes);
+    const result2 = uninstall({ target });
+    assert.ok(result2.restored.includes(roleRel), "backup restored after reconciliation");
+    assert.equal(readFileSync(join(target, roleRel)).toString(), preInstall, "restored bytes are the exact pre-install content");
+    assert.equal(result2.manifestRemoved, true, "uninstall completes after reconciliation");
+  } finally {
+    rmSync(target, { recursive: true, force: true });
+  }
+});
+
+test(`${host}: uninstall keeps a post-install-edited overlay instead of restoring the --force backup`, async () => {
+  const target = makeTarget();
+  try {
+    const oc = join(target, ".opencode");
+    const overlayAbs = join(oc, "oh-my-opencode-slim.json");
+    const preOverlay = `${JSON.stringify({ agents: { [MANAGED_AGENT_KEYS[0]]: { description: "owner's own version" } } }, null, 2)}\n`;
+    writeFileSync(overlayAbs, preOverlay);
+    await install({ packageRoot: REPO_ROOT, target, host, force: true });
+    const mergedBytes = readFileSync(overlayAbs);
+
+    // owner edits the overlay after the force install (managed entry only, so
+    // uninstall's unmerge would collapse the file and reach the backup restore)
+    const forked = `${JSON.stringify({ agents: { [MANAGED_AGENT_KEYS[0]]: { description: "owner fork" } } }, null, 2)}\n`;
+    writeFileSync(overlayAbs, forked);
+    const result = uninstall({ target });
+    assert.ok(result.kept.some((k) => k.path === ".opencode/oh-my-opencode-slim.json"), "drifted overlay kept, backup not restored over it");
+    assert.equal(readFileSync(overlayAbs).toString(), forked, "post-install overlay edit preserved");
+
+    writeFileSync(overlayAbs, mergedBytes);
+    const result2 = uninstall({ target });
+    assert.ok(result2.restored.includes(".opencode/oh-my-opencode-slim.json"), "pre-install overlay backup restored after reconciliation");
+    assert.equal(readFileSync(overlayAbs).toString(), preOverlay, "overlay restored byte-exact");
+    assert.equal(result2.manifestRemoved, true);
+  } finally {
+    rmSync(target, { recursive: true, force: true });
+  }
+});
+}
+
 // --- host detection -----------------------------------------------------------
 
 function fakeExe(dir, name, output) {

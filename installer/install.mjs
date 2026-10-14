@@ -13,8 +13,10 @@
 //   to a fresh inode; the link relationship itself is not preserved or
 //   restored — rollback restores recorded bytes, not inode topology);
 // - reversible within its records: rollback restores the pre-install bytes of
-//   the content it backed up; uninstall reverses only managed content and
-//   intentionally preserves everything else (later user edits, schema/config
+//   the content it backed up, but never over post-install edits — a backed-up
+//   path whose current bytes differ from the recorded installed hash blocks
+//   its own restore and is reported; uninstall reverses only managed content
+//   and intentionally preserves everything else (later user edits, schema/config
 //   values, now-empty dirs) — neither is an exact whole-filesystem reversal.
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync, readdirSync, rmdirSync } from "node:fs";
@@ -359,6 +361,11 @@ function removeEmptyDirsUp(target, relDir, stopRel) {
  * user edits are kept and reported, and non-managed values (schema/config
  * fields, now-empty dirs) intentionally survive. This is a managed-content
  * reversal, not an exact whole-filesystem reversal of the install.
+ * Backup restoration (a `replace` file's backup, the pre-install overlay
+ * backup) is drift-gated: a path whose current bytes differ from the recorded
+ * installed hash is kept and reported instead of restored. Manifests without
+ * recorded hashes cannot be drift-checked; they proceed with an explicit
+ * warning in `warnings`.
  */
 export function uninstall({ target }) {
   target = resolve(target);
@@ -371,6 +378,7 @@ export function uninstall({ target }) {
   const removed = [];
   const kept = [];
   const restored = [];
+  const warnings = [];
 
   for (const file of manifest.files) {
     const abs = toAbs(target, file.path);
@@ -385,7 +393,9 @@ export function uninstall({ target }) {
       continue;
     }
     const currentHash = sha256(readFileSync(abs));
-    if (currentHash !== file.sha256Installed) {
+    if (file.sha256Installed === undefined) {
+      warnings.push(`${file.path}: manifest records no installed hash; drift could not be verified — proceeding`);
+    } else if (currentHash !== file.sha256Installed) {
       kept.push({ path: file.path, reason: "changed after install; left for owner reconciliation" });
       continue;
     }
@@ -413,15 +423,32 @@ export function uninstall({ target }) {
         if (didRemove) {
           if (next === null) {
             if (manifest.overlay.action === "create") {
-              if (sha256(readFileSync(overlayAbs)) === manifest.overlay.sha256Installed) {
+              if (manifest.overlay.sha256Installed === undefined) {
+                warnings.push(`${overlayPath}: manifest records no installed hash; drift could not be verified — deleting the created overlay anyway`);
+                rmSync(overlayAbs);
+                removed.push(overlayPath);
+              } else if (sha256(readFileSync(overlayAbs)) === manifest.overlay.sha256Installed) {
                 rmSync(overlayAbs);
                 removed.push(overlayPath);
               } else {
                 kept.push({ path: overlayPath, reason: "changed after install; left for owner reconciliation" });
               }
             } else if (manifest.overlay.backup && existsSync(toAbs(target, manifest.overlay.backup))) {
-              atomicWriteFileSync(overlayAbs, readFileSync(toAbs(target, manifest.overlay.backup)));
-              restored.push(overlayPath);
+              // restoring the pre-install backup replaces the whole file, so it
+              // is drift-gated like any file backup: post-install owner edits
+              // are kept and reported, never silently overwritten
+              const rec = manifest.overlay;
+              const currentHash = sha256(readFileSync(overlayAbs));
+              if (rec.sha256Installed === undefined) {
+                warnings.push(`${overlayPath}: manifest records no installed hash; drift could not be verified — restoring the backup anyway`);
+                atomicWriteFileSync(overlayAbs, readFileSync(toAbs(target, rec.backup)));
+                restored.push(overlayPath);
+              } else if (currentHash === rec.sha256Installed) {
+                atomicWriteFileSync(overlayAbs, readFileSync(toAbs(target, rec.backup)));
+                restored.push(overlayPath);
+              } else {
+                kept.push({ path: overlayPath, reason: "changed after install; left for owner reconciliation" });
+              }
             }
           } else {
             atomicWriteFileSync(overlayAbs, stringifyJson(next));
@@ -434,7 +461,7 @@ export function uninstall({ target }) {
     }
   }
 
-  const result = { target, removed, restored, kept, host: manifest.host.flavor };
+  const result = { target, removed, restored, kept, warnings, host: manifest.host.flavor };
   if (kept.length === 0) {
     if (manifest.backupRoot && existsSync(toAbs(target, manifest.backupRoot))) {
       rmSync(toAbs(target, manifest.backupRoot), { recursive: true, force: true });
@@ -456,6 +483,13 @@ export function uninstall({ target }) {
  * with its original bytes on a fresh inode, and external twins keep their own
  * (never-written) copies. Covers handled failures during the install run, not
  * untested crash/power-loss recovery.
+ *
+ * Restores are drift-gated: a path whose current bytes differ from the
+ * installed hash recorded at install time changed after install — its restore
+ * is blocked (reported, nothing done for it; other paths still roll back). A
+ * path already holding its recorded pre-install bytes counts as restored.
+ * Manifests without recorded hashes cannot be drift-checked; they proceed
+ * with an explicit warning in `warnings`.
  */
 export function rollback({ target }) {
   target = resolve(target);
@@ -468,6 +502,7 @@ export function rollback({ target }) {
   const restored = [];
   const deleted = [];
   const blocked = [];
+  const warnings = [];
 
   for (const file of manifest.files) {
     const abs = toAbs(target, file.path);
@@ -476,12 +511,27 @@ export function rollback({ target }) {
         blocked.push(file.path);
         continue;
       }
+      const currentHash = existsSync(abs) ? sha256(readFileSync(abs)) : null;
+      if (currentHash !== null && file.sha256Before !== undefined && currentHash === file.sha256Before) {
+        // already in the recorded pre-install state (e.g. restored by an
+        // earlier partial rollback) — nothing to overwrite, not a drift
+        restored.push(file.path);
+        continue;
+      }
+      if (currentHash !== null && file.sha256Installed === undefined) {
+        warnings.push(`${file.path}: manifest records no installed hash; drift could not be verified — restoring the backup anyway`);
+      } else if (currentHash !== null && currentHash !== file.sha256Installed) {
+        blocked.push(file.path);
+        continue;
+      }
       atomicWriteFileSync(abs, readFileSync(toAbs(target, file.backup)));
       restored.push(file.path);
       continue;
     }
     if (!existsSync(abs) || isSymlinkPath(abs)) continue;
-    if (sha256(readFileSync(abs)) !== file.sha256Installed) {
+    if (file.sha256Installed === undefined) {
+      warnings.push(`${file.path}: manifest records no installed hash; drift could not be verified — deleting the created file anyway`);
+    } else if (sha256(readFileSync(abs)) !== file.sha256Installed) {
       blocked.push(file.path);
       continue;
     }
@@ -495,15 +545,32 @@ export function rollback({ target }) {
   const overlayPath = manifest.overlay?.path;
   if (overlayPath) {
     const overlayAbs = toAbs(target, overlayPath);
-    if (manifest.overlay.backup && existsSync(toAbs(target, manifest.overlay.backup))) {
-      if (!isSymlinkPath(overlayAbs)) {
-        atomicWriteFileSync(overlayAbs, readFileSync(toAbs(target, manifest.overlay.backup)));
-        restored.push(overlayPath);
-      } else {
+    const rec = manifest.overlay;
+    const backupAbs = rec.backup ? toAbs(target, rec.backup) : null;
+    if (backupAbs && existsSync(backupAbs)) {
+      if (isSymlinkPath(overlayAbs)) {
         blocked.push(overlayPath);
+      } else {
+        const currentHash = existsSync(overlayAbs) ? sha256(readFileSync(overlayAbs)) : null;
+        if (currentHash !== null && rec.sha256Before !== undefined && currentHash === rec.sha256Before) {
+          restored.push(overlayPath); // already in the recorded pre-install state
+        } else if (currentHash !== null && rec.sha256Installed === undefined) {
+          warnings.push(`${overlayPath}: manifest records no installed hash; drift could not be verified — restoring the backup anyway`);
+          atomicWriteFileSync(overlayAbs, readFileSync(backupAbs));
+          restored.push(overlayPath);
+        } else if (currentHash !== null && currentHash !== rec.sha256Installed) {
+          blocked.push(overlayPath);
+        } else {
+          atomicWriteFileSync(overlayAbs, readFileSync(backupAbs));
+          restored.push(overlayPath);
+        }
       }
     } else if (existsSync(overlayAbs) && !isSymlinkPath(overlayAbs)) {
-      if (sha256(readFileSync(overlayAbs)) === manifest.overlay.sha256Installed) {
+      if (rec.sha256Installed === undefined) {
+        warnings.push(`${overlayPath}: manifest records no installed hash; drift could not be verified — deleting the created overlay anyway`);
+        rmSync(overlayAbs);
+        deleted.push(overlayPath);
+      } else if (sha256(readFileSync(overlayAbs)) === rec.sha256Installed) {
         rmSync(overlayAbs);
         deleted.push(overlayPath);
       } else {
@@ -517,7 +584,7 @@ export function rollback({ target }) {
     if (existsSync(backupRootAbs)) rmSync(backupRootAbs, { recursive: true, force: true });
     manifestMod.removeManifest(target);
   }
-  return { target, restored, deleted, blocked };
+  return { target, restored, deleted, blocked, warnings };
 }
 
 /** Verify: manifest vs disk hashes. */

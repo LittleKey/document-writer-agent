@@ -169,6 +169,7 @@ async function main() {
           for (const d of result.deleted ?? []) console.log(`  deleted  ${d}`);
           for (const k of result.kept ?? []) console.log(`  kept     ${k.path} (${k.reason})`);
           for (const b of result.blocked ?? []) console.log(`  blocked  ${b}`);
+          for (const w of result.warnings ?? []) console.log(`  warn     ${w}`);
           if (result.manifestRemoved === false) {
             console.log("manifest kept: some entries were left for owner reconciliation");
           }
