@@ -529,6 +529,131 @@ test(`${host}: uninstall keeps a post-install-edited overlay instead of restorin
     rmSync(target, { recursive: true, force: true });
   }
 });
+
+const PLUGIN_REL = ".opencode/plugins/claude-advisor.mjs";
+const PLUGIN_SOURCE_REL = join("plugins", "claude-advisor", "index.mjs");
+
+test(`${host}: claude-advisor plugin payload installs at the managed path with recorded hashes`, async () => {
+  const target = makeTarget();
+  try {
+    const sourceBytes = readFileSync(join(REPO_ROOT, PLUGIN_SOURCE_REL));
+
+    const dry = await plan({ packageRoot: REPO_ROOT, target, host });
+    const planned = dry.entries.find((e) => e.path === PLUGIN_REL);
+    assert.ok(planned, "plan lists the plugin payload");
+    assert.equal(planned.action, "create");
+    assert.equal(planned.kind, "plugin");
+    assert.equal(planned.sha256, sha256(sourceBytes), "planned hash is the verbatim source hash");
+
+    const { manifest } = await install({ packageRoot: REPO_ROOT, target, host });
+    const pluginAbs = join(target, ".opencode", "plugins", "claude-advisor.mjs");
+    assert.ok(existsSync(pluginAbs), "payload lands at .opencode/plugins/claude-advisor.mjs");
+    assert.ok(!existsSync(join(target, ".opencode", "plugins", "guard.test.mjs")), "the plugin's own test file is not shipped");
+    assert.equal(readFileSync(pluginAbs).toString(), sourceBytes.toString(), "payload is a verbatim byte-copy of plugins/claude-advisor/index.mjs");
+    const rec = manifest.files.find((f) => f.path === PLUGIN_REL);
+    assert.ok(rec, "manifest records the plugin payload");
+    assert.equal(rec.kind, "plugin");
+    assert.equal(rec.sha256Installed, sha256(sourceBytes), "manifest hash matches the source bytes");
+    assert.equal(manifest.schemaVersion, 1, "record shape extends naturally; schema stays 1");
+
+    const check = verify({ target });
+    assert.equal(check.drift.length, 0);
+    assert.equal(check.missing.length, 0);
+  } finally {
+    rmSync(target, { recursive: true, force: true });
+  }
+});
+
+test(`${host}: pre-existing unmanaged plugin file conflicts; --force takes over and rollback is drift-gated`, async () => {
+  const target = makeTarget();
+  try {
+    const pluginAbs = join(target, ".opencode", "plugins", "claude-advisor.mjs");
+    mkdirSync(join(target, ".opencode", "plugins"), { recursive: true });
+    const ownerBody = "// owner's own claude-advisor variant\nexport const mine = true\n";
+    writeFileSync(pluginAbs, ownerBody);
+    const ownerHash = sha256(ownerBody);
+    const before = snapshot(target);
+
+    await assert.rejects(
+      install({ packageRoot: REPO_ROOT, target, host }),
+      (err) => {
+        assert.ok(err instanceof ConflictError);
+        assert.ok(err.report.some((l) => l.includes(PLUGIN_REL)), "conflict names the plugin path");
+        return true;
+      },
+    );
+    assert.deepEqual(snapshot(target), before, "conflicted install wrote nothing");
+    assert.equal(readFileSync(pluginAbs).toString(), ownerBody, "owner file byte-untouched");
+
+    const { manifest } = await install({ packageRoot: REPO_ROOT, target, host, force: true });
+    const rec = manifest.files.find((f) => f.path === PLUGIN_REL);
+    assert.equal(rec.action, "replace", "force takeover recorded as replace");
+    assert.equal(rec.sha256Before, ownerHash, "pre-install bytes hashed into the record");
+    assert.ok(rec.backup, "byte-exact backup recorded under the backup root");
+    assert.ok(existsSync(join(target, rec.backup)), "backup file exists");
+
+    // drift: the installed payload is edited after the force install
+    writeFileSync(pluginAbs, "// drifted\n");
+    const rb = rollback({ target });
+    assert.ok(rb.blocked.includes(PLUGIN_REL), "drifted payload blocks its own restore");
+    assert.equal(readFileSync(pluginAbs).toString(), "// drifted\n", "blocked restore wrote nothing");
+    assert.ok(existsSync(join(target, ".opencode", "omo-coworkers-install.json")), "manifest retained for reconciliation");
+
+    // reconciled back to the recorded installed bytes: owner's original comes back byte-exact
+    writeFileSync(pluginAbs, readFileSync(join(REPO_ROOT, PLUGIN_SOURCE_REL)));
+    const rb2 = rollback({ target });
+    assert.ok(rb2.restored.includes(PLUGIN_REL), "owner's pre-install file restored");
+    assert.equal(readFileSync(pluginAbs).toString(), ownerBody, "restored bytes are the recorded pre-install bytes");
+    assert.ok(!existsSync(join(target, ".opencode", "omo-coworkers-install.json")), "clean rollback removes the manifest");
+  } finally {
+    rmSync(target, { recursive: true, force: true });
+  }
+});
+
+test(`${host}: uninstall removes the unmodified plugin payload and prunes the created plugins dir; keeps a drifted one`, async () => {
+  const target = makeTarget();
+  try {
+    await install({ packageRoot: REPO_ROOT, target, host });
+
+    // drifted: the payload is edited after install
+    const pluginAbs = join(target, ".opencode", "plugins", "claude-advisor.mjs");
+    writeFileSync(pluginAbs, "// owner edited the dispatch guard\n");
+    const driftResult = uninstall({ target });
+    assert.ok(
+      driftResult.kept.some((k) => k.path === PLUGIN_REL && /changed after install/.test(k.reason)),
+      "drifted payload kept and reported",
+    );
+    assert.equal(readFileSync(pluginAbs).toString(), "// owner edited the dispatch guard\n", "drifted bytes preserved");
+    assert.equal(driftResult.manifestRemoved, false, "manifest retained while entries are pending reconciliation");
+
+    // reconciled: restore the installed bytes, uninstall completes
+    writeFileSync(pluginAbs, readFileSync(join(REPO_ROOT, PLUGIN_SOURCE_REL)));
+    const result = uninstall({ target });
+    assert.ok(result.removed.includes(PLUGIN_REL), "unmodified payload removed");
+    assert.ok(!existsSync(pluginAbs));
+    assert.ok(!existsSync(join(target, ".opencode", "plugins")), "created plugins dir pruned when empty");
+    assert.ok(existsSync(join(target, ".opencode")), ".opencode itself survives");
+    assert.equal(result.manifestRemoved, true);
+  } finally {
+    rmSync(target, { recursive: true, force: true });
+  }
+});
+
+test(`${host}: rollback deletes the created plugin payload and prunes the created dir`, async () => {
+  const target = makeTarget();
+  try {
+    await install({ packageRoot: REPO_ROOT, target, host });
+    assert.ok(existsSync(join(target, PLUGIN_REL)));
+
+    const rb = rollback({ target });
+    assert.ok(rb.deleted.includes(PLUGIN_REL), "created payload deleted");
+    assert.ok(!existsSync(join(target, PLUGIN_REL)));
+    assert.ok(!existsSync(join(target, ".opencode", "plugins")), "created plugins dir pruned");
+    assert.ok(!existsSync(join(target, ".opencode", "omo-coworkers-install.json")), "manifest removed after clean rollback");
+  } finally {
+    rmSync(target, { recursive: true, force: true });
+  }
+});
 }
 
 // --- host detection -----------------------------------------------------------

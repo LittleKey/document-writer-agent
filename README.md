@@ -46,9 +46,9 @@ prompts/
   lark-operator.md         lark-operator agent prompt (prompt authority for the installed native agent file)
 skills/                    3 complete skill directories copied verbatim; no lark-* skills are vendored
 plugins/
-  claude-advisor/          Experimental component — present in the repository but not yet managed by the installer
+  claude-advisor/          Advisor plugin source — installed by the installer (3.1.0+) as `<target>/.opencode/plugins/claude-advisor.mjs`; `guard.test.mjs` is not shipped
 test/install.test.mjs      Fixture suite + optional live-host effective-profile checks (OCW_V1_BIN / OCW_V2_BIN)
-package.json               npm metadata (v3.0.0; bin: coworkers-install; test: node --test)
+package.json               npm metadata (v3.1.0; bin: coworkers-install; test: node --test)
 README.md / INSTALL.md / SOURCES.md / .gitignore
 ```
 
@@ -57,7 +57,9 @@ The retired `writing-plans` skill is no longer bundled (approved removal of the 
 ## Requirements
 
 - Stable [OpenCode](https://opencode.ai) v1 ≥ 1.18.29 within major 1 (installer-level runtime checks ran on 1.18.33) or v2 ≥ 2.0.20 within major 2 (checks ran on 2.0.20); older v1 hosts and versions outside the matrix — below the v2 2.0.20 floor, unknown majors, pre-releases — are rejected. The oh-my-opencode-slim plugin must be installed and loaded for the OMO overlay to take effect — the native role agents and skills register with the host alone.
-- Install with `npx coworkers-install` — npm package **omo-coworkers**, current release **v3.0.0** (`dw-install` remains as a compatibility alias pointing to the same script, `bin/coworkers-install.mjs`).
+- Plugin payload (3.1.0+): installed to `<target>/.opencode/plugins/claude-advisor.mjs`, identical for host v1 and v2, following the official plugin convention — project-level `.opencode/plugins/`, loose JS/TS files auto-loaded at startup (per [opencode.ai/docs/plugins](https://opencode.ai/docs/plugins/), fetched 2026-10-14). Subdirectory layouts are not documented there, hence a single loose file; a config-dir `package.json` is needed only when importing npm packages — ours imports none.
+- Advisor role's omo-slim dependency (documented-only, never installer-gated): validated against omo-slim **3.0.4** (latest at writing); `acpAgents` exists across the omo-slim 3.0.x line; the exact introducing version is not verified, so no "requires ≥ 3.0.4" claim is made. This repository's checks verify file placement and hashes (fixture tests), not live per-host plugin loading.
+- Install with `npx coworkers-install` — npm package **omo-coworkers**, current release **v3.1.0** (`dw-install` remains as a compatibility alias pointing to the same script, `bin/coworkers-install.mjs`).
 - Node ≥ 20 for `bin/coworkers-install.mjs`.
 - Lark features are optional: when requested, install or update `lark-cli` by its official method and grant only the skills it actually exposes (INSTALL §6). Local document-writer→Oracle verification works without any cloud-document CLI.
 

@@ -405,7 +405,7 @@ export function uninstall({ target }) {
       restored.push(file.path);
     } else {
       removed.push(file.path);
-      if (file.kind === "skill") {
+      if (file.kind === "skill" || file.kind === "plugin") {
         removeEmptyDirsUp(target, dirname(file.path).split("\\").join("/"), ".opencode");
       }
     }
@@ -537,7 +537,7 @@ export function rollback({ target }) {
     }
     rmSync(abs);
     deleted.push(file.path);
-    if (file.kind === "skill") {
+    if (file.kind === "skill" || file.kind === "plugin") {
       removeEmptyDirsUp(target, dirname(file.path).split("\\").join("/"), ".opencode");
     }
   }

@@ -18,7 +18,7 @@ import { install, plan, uninstall, rollback, verify, ConflictError, BASELINE } f
 const PACKAGE_ROOT = fileURLToPath(new URL("..", import.meta.url));
 
 function usage(code = 1, message) {
-  const text = `coworkers-install — omo-coworkers ${"3.0.0"} host-aware additive installer
+  const text = `coworkers-install — omo-coworkers ${"3.1.0"} host-aware additive installer
 
 Usage:
   coworkers-install install   [--host v1|v2] [--opencode <exe>] [--target <dir>] [--force] [--json]

@@ -27,7 +27,7 @@ The skill source rows above record the package's earlier source snapshots. The m
 | `oh-my-opencode-slim.json` | Additive agents-only overlay derived from the reviewed live roles: exactly `agents["document-writer"]` and `agents["lark-operator"]` (OMO-schema vocabulary, translated by the plugin per host). The former `agents.oracle` permission block and `agents.orchestrator.skills_remove` list are owner-side personal config (dotfiles) since 2.0.0 and are not part of the generic package. In the 2026-10-06 resync, one leftover Council-dispatch sentence was removed from `agents["lark-operator"].orchestratorPrompt`; nothing else in the overlay changed. |
 | `bin/coworkers-install.mjs`, `installer/*.mjs` | Written for this repository (2.0.0, then named `bin/dw-install.mjs`; renamed to `bin/coworkers-install.mjs` in 3.0.0): host-aware additive installer (render → plan → apply with atomic rename; uninstall/rollback/verify against a manifest). v2 permission action names were confirmed against the `@opencode/cli` 2.0.20 binary; v1 grouped-map behavior validated on 1.18.33. |
 | `test/install.test.mjs` | Written for this repository (2.0.0): fixture suite on isolated temp targets plus optional live-host checks (`OCW_V1_BIN`/`OCW_V2_BIN`, named `DW_V1_BIN`/`DW_V2_BIN` before 3.0.0). |
-| `package.json` | npm metadata for the CLI, v3.0.0 (`bin: coworkers-install`, compatibility alias `dw-install`; `test: node --test`); Node ≥ 20. |
+| `package.json` | npm metadata for the CLI, v3.1.0 (`bin: coworkers-install`, compatibility alias `dw-install`; `test: node --test`); Node ≥ 20. |
 | `README.md`, `INSTALL.md`, `SOURCES.md`, `.gitignore` | Written for this repository. |
 
 ## Overlay design (syntax verified against omo-slim 2.2.21 source; re-checked against 2.2.25 and the 3.0.1 sources, 2026-09-30)
@@ -62,6 +62,11 @@ No `lark-*` skill ships in this repository (24 directories removed by scope deci
 Recorded as historical tested baselines with their actual scope, not current deployment requirements or status. In particular, the 3.0.2-pending statement above describes October 8's phase-1 record; subsequent personal upgrades are recorded by the dotfiles runtime, not by this portable package.
 
 - Skill-bundle retirement run **(2026-10-11)**: after deleting `skills/writing-plans/`, the fixture suite (`node --test`) passed **32/32, 0 fail, 2 skipped** (the optional live v1/v2 checks skipped by design), with adapted assertions: clean install produces the three skills and no `writing-plans`, the manifest lists the three-skill array, a repeat install cannot restore `writing-plans`, and the uninstall pruned-dir check uses `domain-modeling`. The old four-skill → current-package upgrade path was additionally inspected on disposable fixtures for both flavors: the in-place upgrade succeeds, but the stale `writing-plans` directory survives as an unmanaged orphan that a later `uninstall` does not remove (see INSTALL §4). Installer-level evidence only — not a statement that any live installation has been migrated.
+
+## External sources consulted (2026-10-14)
+
+- [opencode.ai/docs/plugins](https://opencode.ai/docs/plugins/) (fetched 2026-10-14): project-level plugins live in `.opencode/plugins/` and are auto-loaded at startup as loose JS/TS files; a config-dir `package.json` is required only when the plugin imports npm packages. Subdirectory layouts are not documented, which is why the installer ships the advisor as a single loose file.
+- omo-slim GitHub release changelogs v3.0.0–v3.0.4 and npm metadata: latest release is 3.0.4 (2026-10-10); `acpAgents` is present across the 3.0.x line. The exact version that introduced `acpAgents` was not established from these sources.
 
 ## Excluded by policy
 

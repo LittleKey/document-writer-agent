@@ -1,6 +1,6 @@
 {
   "name": "omo-coworkers",
-  "version": "3.0.0",
+  "version": "3.1.0",
   "private": true,
   "type": "module",
   "description": "Additive multi-agent orchestration extension for oh-my-opencode-slim: daily-office workflows beyond code, shipped as a reversible overlay with a host-aware installer (OpenCode v1 >=1.18.29, v2 >=2.0.20)",

@@ -28,6 +28,22 @@ export const ROLES = ["document-writer", "lark-operator"];
 export const MANIFEST_NAME = "omo-coworkers-install.json";
 export const OVERLAY_PROJECT = ".opencode/oh-my-opencode-slim.json";
 
+// Managed plugin payload — a single loose file, identical for both host
+// flavors: OpenCode auto-loads project plugins from `.opencode/plugins/` at
+// startup (official convention, https://opencode.ai/docs/plugins). Layout
+// subdirectories are not documented for plugin loading, so claude-advisor
+// ships as one loose file copied verbatim from plugins/claude-advisor/index.mjs
+// (guard.test.mjs is the plugin's own test suite and is not shipped). The
+// plugin is useful against an oh-my-opencode-slim 3.0.x host (its acp_run
+// guard protects a claude advisor dispatched via omo-slim); that omo-slim
+// requirement stays DOCUMENTED-ONLY — the installer never detects or gates
+// the omo-slim version.
+export const PLUGIN_PAYLOAD = {
+  kind: "plugin",
+  path: ".opencode/plugins/claude-advisor.mjs",
+  source: "plugins/claude-advisor/index.mjs",
+};
+
 function sha256(buf) {
   return createHash("sha256").update(buf).digest("hex");
 }
@@ -187,6 +203,15 @@ export function renderPlan({ packageRoot, host, overlay }) {
       });
     }
   }
+
+  // plugin payload: same managed path on either flavor (see PLUGIN_PAYLOAD)
+  files.push({
+    path: PLUGIN_PAYLOAD.path,
+    action: "create",
+    kind: PLUGIN_PAYLOAD.kind,
+    source: PLUGIN_PAYLOAD.source,
+    sha256: sha256(readFileSync(join(packageRoot, PLUGIN_PAYLOAD.source))),
+  });
 
   return {
     host,
