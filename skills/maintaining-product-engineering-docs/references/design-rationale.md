@@ -8,7 +8,7 @@
 
 Skill 负责内容纪律、编辑流程和平台能力选择，不复制具体平台接口。飞书在线文档复用 `lark-doc`，飞书原生 Markdown 复用 `lark-markdown`，ADR 与术语治理复用 `domain-modeling`。本地 Markdown 使用运行环境已有的文件工具；其他平台先核实实际能力。
 
-安装位置为 `/home/littlekey/.agents/skills/maintaining-product-engineering-docs/`。按用户确认，OpenCode 与 Codex 均从该共享目录发现 Skills，不创建额外副本或符号链接。
+安装位置为 `~/.agents/skills/maintaining-product-engineering-docs/`。按用户确认，OpenCode 与 Codex 均从该共享目录发现 Skills，不创建额外副本或符号链接。
 
 ## 主要失败模式与对应设计
 
