@@ -44,7 +44,7 @@ function toAbs(target, rel) {
 }
 
 function backupDirAbs(target, stamp) {
-  return join(target, ".opencode", "document-writer-backup", stamp);
+  return join(target, ".opencode", "omo-coworkers-backup", stamp);
 }
 
 function recordBackup(target, stamp, rel, abs) {
@@ -53,7 +53,7 @@ function recordBackup(target, stamp, rel, abs) {
   const bytes = readFileSync(abs);
   writeFileSync(dest, bytes);
   return {
-    backup: `.opencode/document-writer-backup/${stamp}/${rel}`,
+    backup: `.opencode/omo-coworkers-backup/${stamp}/${rel}`,
     sha256Before: sha256(bytes),
   };
 }
@@ -126,7 +126,7 @@ export async function plan({
   if (existingManifest && existingManifest.host.flavor !== detection.flavor) {
     throw new ConflictError([
       `target ${target} holds a ${existingManifest.host.flavor} install (manifest ${MANIFEST_NAME}) but this run resolved host flavor ${detection.flavor}.`,
-      `Run \`dw-install uninstall --target ${target}\` first, then install for the new host.`,
+      `Run \`coworkers-install uninstall --target ${target}\` first, then install for the new host.`,
     ]);
   }
 
@@ -323,7 +323,7 @@ export function apply(planResult, { now = new Date().toISOString() } = {}) {
     package: planResult.package,
     host: planResult.host,
     installedAt: now,
-    backupRoot: `.opencode/document-writer-backup/${stamp}`,
+    backupRoot: `.opencode/omo-coworkers-backup/${stamp}`,
     files,
     overlay: overlayRecord,
     promptAuthority: Object.fromEntries(
@@ -580,7 +580,7 @@ export function rollback({ target }) {
   }
 
   if (blocked.length === 0) {
-    const backupRootAbs = join(target, ".opencode", "document-writer-backup");
+    const backupRootAbs = join(target, ".opencode", "omo-coworkers-backup");
     if (existsSync(backupRootAbs)) rmSync(backupRootAbs, { recursive: true, force: true });
     manifestMod.removeManifest(target);
   }

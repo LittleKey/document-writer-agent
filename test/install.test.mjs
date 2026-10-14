@@ -1,11 +1,11 @@
-// Isolated fixture tests for the document-writer host-aware installer.
+// Isolated fixture tests for the omo-coworkers host-aware installer.
 //
 // Every test works on a throwaway target directory with pre-existing unrelated
 // configuration, so the suite proves real behavior (additivity, idempotence,
 // conflict aborts, rollback, uninstall) rather than mirroring renderer text.
 //
 // Optional live-host checks (skipped unless env vars are set):
-//   DW_V1_BIN=/path/to/opencode-1.x DW_V2_BIN=/path/to/opencode-2.x node --test
+//   OCW_V1_BIN=/path/to/opencode-1.x OCW_V2_BIN=/path/to/opencode-2.x node --test
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -26,7 +26,7 @@ const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const run = promisify(execFile);
 
 function makeTarget({ withOverlay = true, withAgentFiles = true, withSkills = true } = {}) {
-  const root = mkdtempSync(join(tmpdir(), "dw-inst-test-"));
+  const root = mkdtempSync(join(tmpdir(), "ocw-inst-test-"));
   const oc = join(root, ".opencode");
   mkdirSync(oc, { recursive: true });
   if (withOverlay) {
@@ -194,7 +194,7 @@ for (const host of HOSTS) {
       const after = snapshot(target);
       // the manifest itself carries run bookkeeping (timestamps, actions);
       // idempotence means the target CONFIGURATION is byte-identical
-      const skip = (rel) => rel === ".opencode/document-writer-install.json";
+      const skip = (rel) => rel === ".opencode/omo-coworkers-install.json";
       assert.deepEqual(
         Object.fromEntries(Object.entries(after).filter(([r]) => !skip(r))),
         Object.fromEntries(Object.entries(before).filter(([r]) => !skip(r))),
@@ -251,7 +251,7 @@ for (const host of HOSTS) {
       assert.equal(result.blocked.length, 0);
       assert.equal(readFileSync(join(oc, "oh-my-opencode-slim.json")).toString(), before.toString(), "overlay restored byte-exact");
       assert.ok(existsSync(join(target, "unrelated.txt")));
-      assert.ok(!existsSync(join(target, ".opencode", "document-writer-install.json")), "manifest removed by rollback");
+      assert.ok(!existsSync(join(target, ".opencode", "omo-coworkers-install.json")), "manifest removed by rollback");
       // created role files were deleted, owned files restored
       const agentDir = host === "v1" ? ".opencode/agent" : ".opencode/agents";
       assert.ok(!existsSync(join(target, agentDir, "document-writer.md")), "created role file deleted by rollback");
@@ -399,7 +399,7 @@ for (const host of HOSTS) {
     assert.ok(result.blocked.includes(rel), "drifted file blocks its own restore");
     assert.equal(readFileSync(join(target, rel)).toString(), edited, "drifted file left byte-untouched");
     assert.ok(manifestMod.readManifest(target), "manifest retained while reconciliation is pending");
-    assert.ok(existsSync(join(target, ".opencode", "document-writer-backup")), "backup records retained for later reconciliation");
+    assert.ok(existsSync(join(target, ".opencode", "omo-coworkers-backup")), "backup records retained for later reconciliation");
 
     // clean paths still roll back around the blocked one
     assert.ok(result.deleted.some((p) => p.startsWith(agentDir)), "unrelated created files still deleted");
@@ -409,7 +409,7 @@ for (const host of HOSTS) {
     rmSync(join(target, rel));
     const result2 = rollback({ target });
     assert.equal(result2.blocked.length, 0, "rollback completes after reconciliation");
-    assert.ok(!existsSync(join(target, ".opencode", "document-writer-install.json")), "manifest removed by completed rollback");
+    assert.ok(!existsSync(join(target, ".opencode", "omo-coworkers-install.json")), "manifest removed by completed rollback");
     const overlay = JSON.parse(readFileSync(join(target, ".opencode", "oh-my-opencode-slim.json"), "utf8"));
     assert.ok(overlay.agents["personal-reviewer"], "owner overlay content untouched by rollback");
   } finally {
@@ -468,7 +468,7 @@ test(`${host}: legacy manifest without hash fields rolls back with an explicit w
       "warning names the path whose drift could not be verified",
     );
     assert.equal(readFileSync(join(target, roleRel)).toString(), "---\ndescription: owner role\n---\nbody\n", "backup bytes restored despite the warning");
-    assert.ok(!existsSync(join(target, ".opencode", "document-writer-install.json")), "legacy rollback still completes");
+    assert.ok(!existsSync(join(target, ".opencode", "omo-coworkers-install.json")), "legacy rollback still completes");
   } finally {
     rmSync(target, { recursive: true, force: true });
   }
@@ -589,7 +589,7 @@ test("classify: rejected versions outside the supported matrix", () => {
 });
 
 test("probeExecutable: real host output shapes", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "dw-exe-"));
+  const dir = mkdtempSync(join(tmpdir(), "ocw-exe-"));
   try {
     const v1 = await probeExecutable(fakeExe(dir, "oc1", "1.18.33"));
     assert.equal(v1.ok, true);
@@ -614,7 +614,7 @@ test("probeExecutable: real host output shapes", async () => {
 });
 
 test("install without explicit host uses probeExecutable", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "dw-exe-"));
+  const dir = mkdtempSync(join(tmpdir(), "ocw-exe-"));
   const target = makeTarget();
   try {
     const exe = fakeExe(dir, "oc", "opencode v2.0.20");
@@ -634,7 +634,7 @@ test("install without explicit host uses probeExecutable", async () => {
 });
 
 test("explicit --host plus --opencode: probe must succeed and agree with the flavor", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "dw-exe-"));
+  const dir = mkdtempSync(join(tmpdir(), "ocw-exe-"));
   const target = makeTarget();
   try {
     // mismatch: --host v1 but the executable reports v2
@@ -682,7 +682,7 @@ test("explicit --host without --opencode: offline format generation, version not
 });
 
 test("CLI: explicit --host with mismatching --opencode exits 3; solo --host reports unverified version", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "dw-exe-"));
+  const dir = mkdtempSync(join(tmpdir(), "ocw-exe-"));
   const target = makeTarget();
   try {
     const v1exe = fakeExe(dir, "v1exe", "1.18.33");
@@ -814,10 +814,10 @@ test("symlink at managed path is a conflict — link boundaries stay with the ow
 
 // --- CLI end-to-end ------------------------------------------------------------
 
-const CLI = join(REPO_ROOT, "bin", "dw-install.mjs");
+const CLI = join(REPO_ROOT, "bin", "coworkers-install.mjs");
 
 test("CLI: install/verify/plan/uninstall/rollback exit codes and --json", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "dw-exe-"));
+  const dir = mkdtempSync(join(tmpdir(), "ocw-exe-"));
   const target = makeTarget();
   try {
     const exe = fakeExe(dir, "oc", "opencode v2.0.20");
@@ -826,7 +826,7 @@ test("CLI: install/verify/plan/uninstall/rollback exit codes and --json", async 
     const ins = JSON.parse((await run(process.execPath, [CLI, "install", ...args])).stdout);
     assert.equal(ins.ok, true);
     assert.equal(ins.host.flavor, "v2");
-    assert.ok(ins.manifest.endsWith("document-writer-install.json"));
+    assert.ok(ins.manifest.endsWith("omo-coworkers-install.json"));
 
     const ver = JSON.parse((await run(process.execPath, [CLI, "verify", "--target", target, "--json"])).stdout);
     assert.equal(ver.drift.length, 0);
@@ -877,7 +877,7 @@ test("CLI: install/verify/plan/uninstall/rollback exit codes and --json", async 
 });
 
 // --- optional live-host effective-profile checks -------------------------------
-// Run with: DW_V1_BIN=... DW_V2_BIN=... node --test
+// Run with: OCW_V1_BIN=... OCW_V2_BIN=... node --test
 // These assert the installed artifact actually takes effect in a real host.
 // Shapes observed on the installer-level runtime-tested hosts (2026-09-30):
 //   v1 1.18.33 `debug agent <name>` -> { name, mode, permission: [{permission,
@@ -910,18 +910,18 @@ function liveHostEnv(home, flavor) {
   return env;
 }
 
-test("live v1: installed agents register with rendered permission map", { skip: !process.env.DW_V1_BIN, timeout: 70_000 }, async () => {
+test("live v1: installed agents register with rendered permission map", { skip: !process.env.OCW_V1_BIN, timeout: 70_000 }, async () => {
   const target = makeTarget();
-  const home = mkdtempSync(join(tmpdir(), "dw-v1-home-"));
+  const home = mkdtempSync(join(tmpdir(), "ocw-v1-home-"));
   try {
-    await install({ packageRoot: REPO_ROOT, target, opencode: process.env.DW_V1_BIN });
+    await install({ packageRoot: REPO_ROOT, target, opencode: process.env.OCW_V1_BIN });
     const bodyDw = readFileSync(join(REPO_ROOT, "prompts", "document-writer.md"), "utf8").trim();
     const bodyLo = readFileSync(join(REPO_ROOT, "prompts", "lark-operator.md"), "utf8").trim();
     for (const [role, body, want] of [
       ["document-writer", bodyDw, { task: "deny", webfetch: "deny" }],
       ["lark-operator", bodyLo, { task: "deny", bash: "allow", edit: "deny", write: "deny", webfetch: "allow", websearch: "deny" }],
     ]) {
-      const { stdout } = await run(process.env.DW_V1_BIN, ["debug", "agent", role], {
+      const { stdout } = await run(process.env.OCW_V1_BIN, ["debug", "agent", role], {
         cwd: target, env: liveHostEnv(home, "v1"), timeout: 30_000, killSignal: "SIGKILL",
       });
       const parsed = JSON.parse(stdout);
@@ -937,11 +937,11 @@ test("live v1: installed agents register with rendered permission map", { skip: 
   }
 });
 
-test("live v2: installed agents register with permissions array (serve + /api/agent)", { skip: !process.env.DW_V2_BIN, timeout: 60_000 }, async () => {
+test("live v2: installed agents register with permissions array (serve + /api/agent)", { skip: !process.env.OCW_V2_BIN, timeout: 60_000 }, async () => {
   const net = await import("node:net");
-  const bin = process.env.DW_V2_BIN;
-  const home = mkdtempSync(join(tmpdir(), "dw-v2-home-"));
-  const target = mkdtempSync(join(tmpdir(), "dw-v2-target-"));
+  const bin = process.env.OCW_V2_BIN;
+  const home = mkdtempSync(join(tmpdir(), "ocw-v2-home-"));
+  const target = mkdtempSync(join(tmpdir(), "ocw-v2-target-"));
   const proc = { child: null, exited: false, closed: Promise.resolve() };
   const kill = (signal) => {
     if (proc.child?.pid && !proc.exited) {

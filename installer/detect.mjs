@@ -1,4 +1,4 @@
-// Host detection for the document-writer portable package.
+// Host detection for the omo-coworkers portable package.
 //
 // Supported host configuration (see INSTALL.md "Supported vs runtime-tested"):
 //   v1: stable OpenCode >= 1.18.29, major 1 only  (installer-level runtime checks ran on 1.18.33)

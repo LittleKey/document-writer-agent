@@ -1,4 +1,4 @@
-// Atomic, link-safe writes for the document-writer installer.
+// Atomic, link-safe writes for the omo-coworkers installer.
 //
 // The owner's live deployment hard-links the global and dotfiles copies of
 // opencode.json / oh-my-opencode-slim.json (same inode, link count 2), and the
@@ -16,7 +16,7 @@ import { writeFileSync, renameSync, rmSync, lstatSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 
 export function atomicWriteFileSync(absPath, data) {
-  const tmp = `${absPath}.dw-tmp-${process.pid}-${randomBytes(4).toString("hex")}`;
+  const tmp = `${absPath}.ocw-tmp-${process.pid}-${randomBytes(4).toString("hex")}`;
   try {
     writeFileSync(tmp, data);
     renameSync(tmp, absPath);

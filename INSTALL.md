@@ -1,6 +1,6 @@
-# Install (2.0.0 — dual-host installer)
+# Install (omo-coworkers 3.0.0 — dual-host installer)
 
-The repository ships `bin/dw-install.mjs`, a host-aware additive installer. One command installs the two role agents and the three bundled skills into an OpenCode project on either host flavor, records a machine-readable manifest, and reverses its own writes — `uninstall` reverses managed content while intentionally preserving everything else, and `rollback` restores the recorded pre-install bytes of backed-up content; neither is an exact whole-filesystem reversal (§4). It never switches the preset, pins models, overwrites unrelated configuration, or writes through hard links.
+The `omo-coworkers` package ships `bin/coworkers-install.mjs`, a host-aware additive installer (npm bin `coworkers-install`; the `dw-install` command is retained as a compatibility alias pointing to the same script). One command installs the two role agents and the three bundled skills into an OpenCode project on either host flavor, records a machine-readable manifest, and reverses its own writes — `uninstall` reverses managed content while intentionally preserving everything else, and `rollback` restores the recorded pre-install bytes of backed-up content; neither is an exact whole-filesystem reversal (§4). It never switches the preset, pins models, overwrites unrelated configuration, or writes through hard links.
 
 Supported hosts, by what was actually run — keep the records distinct:
 
@@ -25,11 +25,11 @@ For host flavor **v1** (agent dir `.opencode/agent/`, skill dir `.opencode/skill
    - document-writer denies delegation, question, webfetch, websearch, and research MCP tools; lark-operator allows read/glob/grep/webfetch/shell and denies edit, write, delegation, question, websearch, patch tools, and research MCP tools.
 2. **Skills** — the three bundled directories (`maintaining-product-engineering-docs`, `domain-modeling`, `humanizer`) copied byte-for-byte into the host-native skill dir. The formerly bundled `writing-plans` was removed on 2026-10-11 and is never created by fresh installs or reinstalls; targets upgraded from the older four-skill package need the explicit handling described in §4. **No `lark-*` skills and no private skills are vendored**; personal model pins and the personal Orchestrator exclusion guardrails are not carried (they live in the owner's dotfiles configuration).
 3. **OMO overlay** — `.opencode/oh-my-opencode-slim.json`, additive: the installer manages exactly `agents["document-writer"]` and `agents["lark-operator"]` (OMO-schema vocabulary — `inheritModelFrom: "session"`, skill grants, `orchestratorPrompt` dispatch rules, `permission` map — translated by the plugin per host). Every other **semantic value** of target-managed config is preserved through a structured merge: unknown top-level keys, other agents, presets, and unknown keys inside the two managed entries. The merged overlay is re-serialized (2-space JSON with a trailing newline), so the original byte layout is **not** preserved — only non-overlay files are byte-exact. The overlay carries no `prompt`/system text and no OMO prompt-dir copies are written, so each role's effective prompt is the native agent file (observed on both installer-level runtime-tested hosts **without the OMO plugin loaded**: v1 1.18.33 `debug agent <name>` shows the body as `prompt`; v2 2.0.20 `/api/agent` shows it as `system`; combined native+OMO precedence was not established by these checks).
-4. **Manifest** — `.opencode/document-writer-install.json` (schemaVersion 1): package baseline, host flavor + detected version, per-file actions with installed SHA-256s, overlay action + backup pointer, prompt-authority paths, skill list. Consumed by `uninstall`, `rollback`, and `verify`.
+4. **Manifest** — `.opencode/omo-coworkers-install.json` (schemaVersion 1): package baseline, host flavor + detected version, per-file actions with installed SHA-256s, overlay action + backup pointer, prompt-authority paths, skill list. Consumed by `uninstall`, `rollback`, and `verify`.
 
 ### Builtin-role appends across machines
 
-The five builtin-role appends have one maintenance source: [dotfiles/opencode/oh-my-opencode-slim](https://github.com/LittleKey/dotfiles/tree/master/opencode/oh-my-opencode-slim), with `designer_append.md`, `explorer_append.md`, `librarian_append.md`, `oracle_append.md` and `orchestrator_append.md`. This repository contains no mirrors. `dw-install` installs the two custom-role bodies and skills described above; it neither supplies nor updates builtin-role appends.
+The five builtin-role appends have one maintenance source: [dotfiles/opencode/oh-my-opencode-slim](https://github.com/LittleKey/dotfiles/tree/master/opencode/oh-my-opencode-slim), with `designer_append.md`, `explorer_append.md`, `librarian_append.md`, `oracle_append.md` and `orchestrator_append.md`. This repository contains no mirrors. `coworkers-install` installs the two custom-role bodies and skills described above; it neither supplies nor updates builtin-role appends.
 
 For machines that share the personal OMO policy, select the same dotfiles commit and use its `opencode/runtime/profile.json` prompt hashes. Point that machine's `inputs.omoPromptDir.source` at its own checkout's `opencode/oh-my-opencode-slim` directory. Relocating a checkout changes the path, not the approved content or hashes. The personal runtime verifies the pinned inventory before staging and copies accepted prompt bytes unchanged. Install through the target's existing OMO/profile deployment, then compare the five installed file hashes with that same inventory. Do not edit installed copies or create a new mirror in this package.
 
@@ -38,13 +38,15 @@ The full personal runtime still has machine-specific configuration, plugin artif
 ## 2. Usage
 
 ```sh
-node bin/dw-install.mjs install                      # auto-detect host from `opencode --version`
-node bin/dw-install.mjs install --host v2 --target ~/proj --opencode /path/to/opencode2
-node bin/dw-install.mjs plan      [...]              # dry run — prints the artifact plan, writes nothing
-node bin/dw-install.mjs verify    --target ~/proj    # manifest vs disk hashes → ok | drift | missing
-node bin/dw-install.mjs uninstall --target ~/proj    # reverse everything the install wrote
-node bin/dw-install.mjs rollback  --target ~/proj    # restore the exact pre-install state from backups
+coworkers-install install                            # auto-detect host from `opencode --version`
+coworkers-install install --host v2 --target ~/proj --opencode /path/to/opencode2
+coworkers-install plan      [...]                    # dry run — prints the artifact plan, writes nothing
+coworkers-install verify    --target ~/proj          # manifest vs disk hashes → ok | drift | missing
+coworkers-install uninstall --target ~/proj          # reverse everything the install wrote
+coworkers-install rollback  --target ~/proj          # restore the exact pre-install state from backups
 ```
+
+`coworkers-install` is the npm bin of the `omo-coworkers` package (run it as `npx coworkers-install …`); from a repository checkout, `node bin/coworkers-install.mjs …` is equivalent. The `dw-install` command remains as a compatibility alias pointing to the same script.
 
 Flags: `--host v1|v2` (skip detection), `--opencode <exe>` (detection executable, default `opencode` on PATH), `--target <dir>` (default cwd), `--force`, `--json`. Exit codes: `0` ok · `1` usage · `2` conflict (nothing written) · `3` host detection failure · `4` no manifest (uninstall/rollback without an install).
 
@@ -54,7 +56,7 @@ Detection parses `semver` from `<exe> --version` (stdout+stderr). Requires Node 
 
 - **Nothing is written unless the whole plan is conflict-free.** Any conflict aborts with exit 2 before the first write.
 - **Conflicts** (exit 2): an unmanaged file exists at a managed path (`agent/`/`agents/<role>.md`, skill dirs); a project `oh-my-opencode-slim.jsonc` exists (it shadows `.json` in the plugin's resolution, so an additive `.json` install would be inert — merge the fragment into the `.jsonc` manually); the existing overlay already defines a managed agent key; the overlay path is a symlink; the manifest pins a different host flavor than requested.
-- **`--force`** takes over conflicting content only after recording byte-exact backups under `.opencode/document-writer-backup/<stamp>/`. Symlinks at managed paths are never replaced — they stay conflicts even with `--force` (link boundaries stay with the owner).
+- **`--force`** takes over conflicting content only after recording byte-exact backups under `.opencode/omo-coworkers-backup/<stamp>/`. Symlinks at managed paths are never replaced — they stay conflicts even with `--force` (link boundaries stay with the owner).
 - **Hard-link write-through is impossible by construction**: every write is computed in full, written to a same-directory temp file, and committed with `rename()`, which swaps the directory entry to a fresh inode instead of writing through an existing link (the owner's deployment hard-links global and dotfiles copies of `opencode.json`/`oh-my-opencode-slim.json`). The consequence is intentional: external twins keep their original bytes and inode — never corrupted — while the managed path moves to a fresh inode, breaking the link relationship. The installer safely edits around existing hard links; it does **not** re-create or restore inode relationships (§4). Covered by dedicated regression tests.
 - **Drift**: if a managed file changed since install, reinstall aborts (exit 2) without touching it; with `--force` the drifted content is backed up byte-exact and replaced. `verify` reports any drift.
 
@@ -82,11 +84,11 @@ The package vendors no Lark skills; `lark-operator` installs capability-less (`"
 
 ## 7. Verification — what was actually run (2026-09-30)
 
-Distinguish fixture-unit evidence from real-host evidence:
+Distinguish fixture-unit evidence from real-host evidence. The optional live-host checks are selected by pointing `OCW_V1_BIN` / `OCW_V2_BIN` at an OpenCode v1 / v2 executable (renamed from `DW_V1_BIN` / `DW_V2_BIN` in 3.0.0); without them the suite runs fixtures only:
 
 - **Fixture suite** (`node --test`, 32 tests, isolated temp targets): additivity, idempotent reinstall, conflict aborts with zero writes, `--force` takeover with byte-exact backups, rollback recorded-byte restoration, uninstall reconciliation rules, cross-flavor manifest pinning, `.jsonc` shadow, drift handling, hard-link write-through protection (fixture twins), symlink conflicts, CLI exit codes/`--json`, merge semantics, version-boundary classification, rejected-version matrix (below the v2 floor, unknown majors, pre-releases), and explicit-host probing (`--host` + `--opencode` mismatch and nonzero-exit rejection; `--host` alone reported as version-not-verified offline format generation).
-- **Live v1 1.18.33** (`DW_V1_BIN=$(which opencode) node --test`): both agents register (`debug agent <name>`), mode `subagent`, prompt body byte-identical to the source prompt, and the effective permission array shows the rendered map (`task: deny`, `webfetch: deny` for document-writer; `bash: allow`, `edit/write: deny`, `webfetch: allow`, `websearch: deny` for lark-operator).
-- **Live v2 2.0.20** (isolated `DW_V2_BIN=… node --test`): the real 2.0.20 host served in a fully isolated environment (own HOME/XDG/DB/plugin-cache; **zero model requests**; production untouched; **no OMO plugin installed**). `GET /api/agent` after session hydration: exactly **one** registration per role in that environment (no duplicate; since the plugin layer was not loaded there, this does not establish combined native+OMO precedence — owner-validated separately), `system` is the verbatim prompt body, and the effective `permissions` array carries the rendered v2 vocabulary (document-writer: `subagent`/`question`/`webfetch`/`websearch`/`gh_grep_*`/`context7_*` deny; lark-operator: `read`/`glob`/`grep`/`webfetch`/`shell` allow, `edit`/`write`/`subagent`/`question`/`websearch`/`apply_patch`/`ast_grep_replace` deny).
+- **Live v1 1.18.33** (`OCW_V1_BIN=$(which opencode) node --test`): both agents register (`debug agent <name>`), mode `subagent`, prompt body byte-identical to the source prompt, and the effective permission array shows the rendered map (`task: deny`, `webfetch: deny` for document-writer; `bash: allow`, `edit/write: deny`, `webfetch: allow`, `websearch: deny` for lark-operator).
+- **Live v2 2.0.20** (isolated `OCW_V2_BIN=… node --test`): the real 2.0.20 host served in a fully isolated environment (own HOME/XDG/DB/plugin-cache; **zero model requests**; production untouched; **no OMO plugin installed**). `GET /api/agent` after session hydration: exactly **one** registration per role in that environment (no duplicate; since the plugin layer was not loaded there, this does not establish combined native+OMO precedence — owner-validated separately), `system` is the verbatim prompt body, and the effective `permissions` array carries the rendered v2 vocabulary (document-writer: `subagent`/`question`/`webfetch`/`websearch`/`gh_grep_*`/`context7_*` deny; lark-operator: `read`/`glob`/`grep`/`webfetch`/`shell` allow, `edit`/`write`/`subagent`/`question`/`websearch`/`apply_patch`/`ast_grep_replace` deny).
 - Known environment limit: the v2 CLI subcommand `debug agents` does not terminate in this sandbox (hangs with no output even outside an install), so the v2 live check drives the host server API instead — the same registration path the TUI uses.
 
 Run the same acceptance on your own target and record it here. `uninstall` then `verify` (expect exit 4: no manifest) closes the loop on a disposable target.
@@ -95,3 +97,12 @@ Run the same acceptance on your own target and record it here. `uninstall` then 
 
 - Stable OpenCode v1 ≥ 1.18.29 within major 1, or v2 ≥ 2.0.20 within major 2 (see table above; unknown majors and pre-releases are rejected) with the oh-my-opencode-slim plugin installed and loaded for the OMO overlay to take effect; the native role agents and skills register with the host alone.
 - Node ≥ 20 for the installer. Lark features are optional (§6).
+
+## 9. Migrating from ≤2.x
+
+The 3.0.0 rename (package `omo-coworkers`) changed the installer's on-disk names:
+
+- Install manifest: `.opencode/document-writer-install.json` (≤2.x) → `.opencode/omo-coworkers-install.json` (3.0.0).
+- Backup directory: `.opencode/document-writer-backup/` (≤2.x) → `.opencode/omo-coworkers-backup/` (3.0.0).
+
+The 3.0.0 installer tracks only the new names. An existing ≤2.x install must therefore be uninstalled with the **old** package revision before installing 3.0.0 (from the old checkout: `node bin/dw-install.mjs uninstall --target <dir>`); installing 3.0.0 over a leftover ≤2.x install would leave that install orphaned — its managed content stays on disk with no manifest the 3.0.0 installer tracks. This is the same policy applied when `writing-plans` was retired (§4).

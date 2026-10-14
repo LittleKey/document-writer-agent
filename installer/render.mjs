@@ -24,9 +24,8 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import { createHash } from "node:crypto";
 
-export const PACKAGE_NAME = "document-writer";
 export const ROLES = ["document-writer", "lark-operator"];
-export const MANIFEST_NAME = "document-writer-install.json";
+export const MANIFEST_NAME = "omo-coworkers-install.json";
 export const OVERLAY_PROJECT = ".opencode/oh-my-opencode-slim.json";
 
 function sha256(buf) {

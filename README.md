@@ -1,10 +1,22 @@
-# document-writer
+# omo-coworkers
 
-A portable extension for [OpenCode](https://opencode.ai) projects that adds a two-agent document workflow with an Oracle evidence-review loop, installed by the bundled host-aware installer (`bin/dw-install.mjs`) on either OpenCode host flavor (v1 ≥ 1.18.29 within major 1, installer-level runtime checks ran on 1.18.33; v2 ≥ 2.0.20 within major 2, checks ran on 2.0.20; unknown majors and pre-release versions are rejected):
+**omo-slim handles the code. This project adds the multi-agent orchestration for the rest of your daily work — additively, reversibly, always tracking upstream.**
+
+「代码之外的多 agent 办公编排，增量叠加于 omo-slim。」
+
+omo-coworkers is an additive orchestration extension on top of oh-my-opencode-slim (OMO) — not a fork, and not a pile of agents. Delivered today: reviewed document workflows (the **document-writer** role) plus optional Lark/Feishu operations (the **lark-operator** role). It installs as a reversible overlay into your existing OMO setup, is multi-host deployable, and tracks upstream OMO instead of forking it. The growth direction is reusable orchestration policies for daily work beyond code.
+
+## Design principles
+
+- **Additive-only** — never removes or overrides user config.
+- **Fully reversible** — uninstall/rollback restore the original state, drift-gated by recorded hashes.
+- **Upstream-tracking** — component-level compatibility matrix instead of pinning.
+
+## Roles and delivery policy
 
 - **document-writer** — bounded creation and editing of formal product and engineering documents (PRDs, technical solutions, architecture/interface designs, delivery documents, ADRs), dispatched with one explicit mode: `MODE: WRITE` for creation/body edits, `MODE: REVIEW` for expression, structure, document-internal consistency, audience fit, and readability (returns `PASS | REJECT | BLOCKED` with findings bound to the inspected revision and its retained reply; never certifies protocol/technical semantics). Writing follows a layered read-back after each editing round plus a final whole-document verification; a `DONE` result is returned once, with the content location and a retrievable revision (or readable retained snapshot) plus its hash for every substantive edit. A plain `DONE` covers writing and self-check only — it excludes independent review and publication.
 - **lark-operator** — all Feishu/Lark reads and operations except formal document bodies: writer-side Lark body editing happens only in document-writer under explicit user opt-in with compatible granted skills, and is unavailable otherwise — never through lark-operator. Every write or external effect requires explicit user authorization (otherwise `NEEDS_AUTHORIZATION`); authorization transfers from the original task, so a dispatched task that states its scope, recipients, content, and permitted effects — traceable to explicit user consent — runs without per-API re-asking, while missing or exceeded authorization still returns `NEEDS_AUTHORIZATION`. Oracle approval applies additionally when requested or for impact-gated categories — security/privacy/permissions, breaking contracts, irreversible/high-loss actions, formal approvals, external legal/commercial/SLA commitments (missing approval → `NEEDS_REVIEW`). Platform or API choice alone does not trigger review. WebFetch is permitted solely for official Feishu/Lark API documentation needed by dispatched operations — never as general web access. Optional integration: it ships capability-less and is populated only from `lark-*` skills independently installed on the target (none are vendored here).
-- **Builtin-role policy** — the Oracle, Orchestrator, Explorer, Designer and Librarian appends are maintained only in [dotfiles/opencode/oh-my-opencode-slim](https://github.com/LittleKey/dotfiles/tree/master/opencode/oh-my-opencode-slim). This package contains no copies and `dw-install` does not install them. Targets that use that personal policy deploy the appends from one selected dotfiles revision; see [INSTALL.md](INSTALL.md#builtin-role-appends-across-machines). The two custom-role prompt bodies remain in this package.
+- **Builtin-role policy** — the Oracle, Orchestrator, Explorer, Designer and Librarian appends are maintained only in [dotfiles/opencode/oh-my-opencode-slim](https://github.com/LittleKey/dotfiles/tree/master/opencode/oh-my-opencode-slim). This package contains no copies and `coworkers-install` does not install them. Targets that use that personal policy deploy the appends from one selected dotfiles revision; see [INSTALL.md](INSTALL.md#builtin-role-appends-across-machines). The two custom-role prompt bodies remain in this package.
 - **Result delivery without a publication tool** — long results may be returned as citations of retained records only after the host confirms author, message, byte-exact content, and receiver readability; otherwise the full original text is returned, and original records are never rewritten. This citation capability is a **host** feature (BCP plugin plus host integration): installing this portable template alone does not provide it. Without that integration, agents return complete original replies and never fabricate citations, receipts, or record IDs. Host retention follows the host's announced convention and is a work record, not business publication. Sending a document or result to external recipients is a separate authorized operation using the destination's supported interface. When no publication mechanism is available, agents return usable results with stated limits rather than claiming a published handoff.
 
 ## Effective-source rule
@@ -27,14 +39,16 @@ The config overlay (`oh-my-opencode-slim.json`) touches only the `agents` sectio
 
 ```
 oh-my-opencode-slim.json   Additive agents-only overlay (no preset, no model IDs, no MCP grants, no prompt text — both agents carry empty `mcps` lists)
-bin/dw-install.mjs         Host-aware installer CLI: install | plan | uninstall | rollback | verify (--json)
+bin/coworkers-install.mjs  Host-aware installer CLI: install | plan | uninstall | rollback | verify (--json); writes the target manifest `.opencode/omo-coworkers-install.json`
 installer/                 Renderer (per-host permission vocabulary), merge, detect, manifest, atomic-write modules
 prompts/
   document-writer.md       document-writer agent prompt (prompt authority for the installed native agent file)
   lark-operator.md         lark-operator agent prompt (prompt authority for the installed native agent file)
 skills/                    3 complete skill directories copied verbatim; no lark-* skills are vendored
-test/install.test.mjs      Fixture suite + optional live-host effective-profile checks (DW_V1_BIN / DW_V2_BIN)
-package.json               npm metadata (v2.0.0; bin: dw-install; test: node --test)
+plugins/
+  claude-advisor/          Experimental component — present in the repository but not yet managed by the installer
+test/install.test.mjs      Fixture suite + optional live-host effective-profile checks (OCW_V1_BIN / OCW_V2_BIN)
+package.json               npm metadata (v3.0.0; bin: coworkers-install; test: node --test)
 README.md / INSTALL.md / SOURCES.md / .gitignore
 ```
 
@@ -42,8 +56,9 @@ The retired `writing-plans` skill is no longer bundled (approved removal of the 
 
 ## Requirements
 
-- Stable OpenCode v1 ≥ 1.18.29 within major 1 (installer-level runtime checks ran on 1.18.33) or v2 ≥ 2.0.20 within major 2 (checks ran on 2.0.20); older v1 hosts and versions outside the matrix — below the v2 2.0.20 floor, unknown majors, pre-releases — are rejected. The oh-my-opencode-slim plugin must be installed and loaded for the OMO overlay to take effect — the native role agents and skills register with the host alone.
-- Node ≥ 20 for `bin/dw-install.mjs`.
+- Stable [OpenCode](https://opencode.ai) v1 ≥ 1.18.29 within major 1 (installer-level runtime checks ran on 1.18.33) or v2 ≥ 2.0.20 within major 2 (checks ran on 2.0.20); older v1 hosts and versions outside the matrix — below the v2 2.0.20 floor, unknown majors, pre-releases — are rejected. The oh-my-opencode-slim plugin must be installed and loaded for the OMO overlay to take effect — the native role agents and skills register with the host alone.
+- Install with `npx coworkers-install` — npm package **omo-coworkers**, current release **v3.0.0** (`dw-install` remains as a compatibility alias pointing to the same script, `bin/coworkers-install.mjs`).
+- Node ≥ 20 for `bin/coworkers-install.mjs`.
 - Lark features are optional: when requested, install or update `lark-cli` by its official method and grant only the skills it actually exposes (INSTALL §6). Local document-writer→Oracle verification works without any cloud-document CLI.
 
 [INSTALL.md](INSTALL.md) documents the installer (install/plan/uninstall/rollback/verify), conflict and hard-link-safety rules, effective-source notes, optional Lark integration, and the split between fixture-unit and real-host evidence. Every file's origin is recorded in [SOURCES.md](SOURCES.md).

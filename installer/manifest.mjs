@@ -1,4 +1,4 @@
-// Machine-readable install manifest: <target>/.opencode/document-writer-install.json
+// Machine-readable install manifest: <target>/.opencode/omo-coworkers-install.json
 // Consumed by uninstall/rollback/verify and by downstream personal deployment.
 
 import { readFileSync, existsSync, rmSync } from "node:fs";
@@ -9,7 +9,7 @@ import { atomicWriteFileSync } from "./atomic.mjs";
 export const SCHEMA_VERSION = 1;
 
 export function manifestPath(target) {
-  return join(target, ".opencode", "document-writer-install.json");
+  return join(target, ".opencode", "omo-coworkers-install.json");
 }
 
 export function readManifest(target) {

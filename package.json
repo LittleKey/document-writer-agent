@@ -1,11 +1,12 @@
 {
-  "name": "document-writer",
-  "version": "2.0.0",
+  "name": "omo-coworkers",
+  "version": "3.0.0",
   "private": true,
   "type": "module",
-  "description": "Portable document-writer roles, skills and host-aware additive installer for OpenCode v1 (>=1.18.29) and v2 (>=2.0.20)",
+  "description": "Additive multi-agent orchestration extension for oh-my-opencode-slim: daily-office workflows beyond code, shipped as a reversible overlay with a host-aware installer (OpenCode v1 >=1.18.29, v2 >=2.0.20)",
   "bin": {
-    "dw-install": "./bin/dw-install.mjs"
+    "coworkers-install": "./bin/coworkers-install.mjs",
+    "dw-install": "./bin/coworkers-install.mjs"
   },
   "scripts": {
     "test": "node --test test/*.test.mjs"

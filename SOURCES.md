@@ -25,9 +25,9 @@ The skill source rows above record the package's earlier source snapshots. The m
 | Repo path | Derivation |
 |---|---|
 | `oh-my-opencode-slim.json` | Additive agents-only overlay derived from the reviewed live roles: exactly `agents["document-writer"]` and `agents["lark-operator"]` (OMO-schema vocabulary, translated by the plugin per host). The former `agents.oracle` permission block and `agents.orchestrator.skills_remove` list are owner-side personal config (dotfiles) since 2.0.0 and are not part of the generic package. In the 2026-10-06 resync, one leftover Council-dispatch sentence was removed from `agents["lark-operator"].orchestratorPrompt`; nothing else in the overlay changed. |
-| `bin/dw-install.mjs`, `installer/*.mjs` | Written for this repository (2.0.0): host-aware additive installer (render → plan → apply with atomic rename; uninstall/rollback/verify against a manifest). v2 permission action names were confirmed against the `@opencode/cli` 2.0.20 binary; v1 grouped-map behavior validated on 1.18.33. |
-| `test/install.test.mjs` | Written for this repository (2.0.0): fixture suite on isolated temp targets plus optional live-host checks (`DW_V1_BIN`/`DW_V2_BIN`). |
-| `package.json` | npm metadata for the CLI (`bin: dw-install`, `test: node --test`); Node ≥ 20. |
+| `bin/coworkers-install.mjs`, `installer/*.mjs` | Written for this repository (2.0.0, then named `bin/dw-install.mjs`; renamed to `bin/coworkers-install.mjs` in 3.0.0): host-aware additive installer (render → plan → apply with atomic rename; uninstall/rollback/verify against a manifest). v2 permission action names were confirmed against the `@opencode/cli` 2.0.20 binary; v1 grouped-map behavior validated on 1.18.33. |
+| `test/install.test.mjs` | Written for this repository (2.0.0): fixture suite on isolated temp targets plus optional live-host checks (`OCW_V1_BIN`/`OCW_V2_BIN`, named `DW_V1_BIN`/`DW_V2_BIN` before 3.0.0). |
+| `package.json` | npm metadata for the CLI, v3.0.0 (`bin: coworkers-install`, compatibility alias `dw-install`; `test: node --test`); Node ≥ 20. |
 | `README.md`, `INSTALL.md`, `SOURCES.md`, `.gitignore` | Written for this repository. |
 
 ## Overlay design (syntax verified against omo-slim 2.2.21 source; re-checked against 2.2.25 and the 3.0.1 sources, 2026-09-30)

@@ -1,12 +1,12 @@
 #!/usr/bin/env node
-// dw-install — host-aware additive installer for the document-writer package.
+// coworkers-install — host-aware additive installer for the omo-coworkers package.
 //
 // Usage:
-//   dw-install install   [--host v1|v2] [--opencode <exe>] [--target <dir>] [--force] [--json]
-//   dw-install plan      [same flags]                              (dry run)
-//   dw-install uninstall --target <dir> [--json]
-//   dw-install rollback  --target <dir> [--json]
-//   dw-install verify    --target <dir> [--json]
+//   coworkers-install install   [--host v1|v2] [--opencode <exe>] [--target <dir>] [--force] [--json]
+//   coworkers-install plan      [same flags]                              (dry run)
+//   coworkers-install uninstall --target <dir> [--json]
+//   coworkers-install rollback  --target <dir> [--json]
+//   coworkers-install verify    --target <dir> [--json]
 //
 // Exit codes: 0 ok · 1 usage · 2 conflict (nothing written) · 3 host detection
 // failed · 4 no install manifest found.
@@ -18,14 +18,14 @@ import { install, plan, uninstall, rollback, verify, ConflictError, BASELINE } f
 const PACKAGE_ROOT = fileURLToPath(new URL("..", import.meta.url));
 
 function usage(code = 1, message) {
-  const text = `dw-install — document-writer ${"2.0.0"} host-aware additive installer
+  const text = `coworkers-install — omo-coworkers ${"3.0.0"} host-aware additive installer
 
 Usage:
-  dw-install install   [--host v1|v2] [--opencode <exe>] [--target <dir>] [--force] [--json]
-  dw-install plan      [...]                                  dry run, writes nothing
-  dw-install uninstall --target <dir> [--json]
-  dw-install rollback  --target <dir> [--json]
-  dw-install verify    --target <dir> [--json]
+  coworkers-install install   [--host v1|v2] [--opencode <exe>] [--target <dir>] [--force] [--json]
+  coworkers-install plan      [...]                                  dry run, writes nothing
+  coworkers-install uninstall --target <dir> [--json]
+  coworkers-install rollback  --target <dir> [--json]
+  coworkers-install verify    --target <dir> [--json]
 
 Options:
   --host <v1|v2>     OpenCode host flavor. Omit to auto-detect from
@@ -41,7 +41,7 @@ Options:
   --force            Take over conflicting files, recording byte-exact backups
                      first. Without it, conflicts abort before any write.
   --json             Machine-readable JSON result (manifest is always written
-                     as <target>/.opencode/document-writer-install.json).
+                     as <target>/.opencode/omo-coworkers-install.json).
 
 Package baseline: ${BASELINE}`;
   if (message) console.error(`error: ${message}`);
@@ -120,7 +120,7 @@ async function main() {
               host: result.manifest.host,
               files: result.manifest.files,
               overlay: result.manifest.overlay,
-              manifest: ".opencode/document-writer-install.json",
+              manifest: ".opencode/omo-coworkers-install.json",
               skills: result.manifest.skills,
               promptAuthority: result.manifest.promptAuthority,
             };
@@ -144,7 +144,7 @@ async function main() {
         console.log(`  ${summary.overlay.action.padEnd(9)} ${summary.overlay.path}`);
         if (opts.command === "install") {
           console.log(`manifest: ${summary.manifest}`);
-          console.log(`uninstall: dw-install uninstall --target ${target}`);
+          console.log(`uninstall: coworkers-install uninstall --target ${target}`);
         }
       }
       break;
