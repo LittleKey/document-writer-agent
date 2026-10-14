@@ -1,4 +1,4 @@
-# Install (omo-coworkers 3.1.0 — dual-host installer)
+# Install (omo-coworkers 3.2.0 — dual-host installer)
 
 The `omo-coworkers` package ships `bin/coworkers-install.mjs`, a host-aware additive installer (npm bin `coworkers-install`; the `dw-install` command is retained as a compatibility alias pointing to the same script). One command installs the two role agents and the three bundled skills into an OpenCode project on either host flavor, records a machine-readable manifest, and reverses its own writes — `uninstall` reverses managed content while intentionally preserving everything else, and `rollback` restores the recorded pre-install bytes of backed-up content; neither is an exact whole-filesystem reversal (§4). It never switches the preset, pins models, overwrites unrelated configuration, or writes through hard links.
 
@@ -6,8 +6,8 @@ Supported hosts, by what was actually run — keep the records distinct:
 
 | Host flavor | Supported | Installer-level runtime checks ran on | Notes |
 | --- | --- | --- | --- |
-| v1 | stable OpenCode ≥ 1.18.29 within major 1 | 1.18.33 | dual plugin entrypoints require ≥ 1.18.29; older v1 is rejected |
-| v2 | stable OpenCode ≥ 2.0.20 within major 2 | 2.0.20 | 2.0.19 and below sit below the initial v2 installation floor; other stable ≥ 2.0.20 versions are a supported configuration whose installer-level runtime checks have not been run here |
+| v1 | stable OpenCode ≥ 1.18.29 within major 1 | 1.18.33, 1.18.35 | dual plugin entrypoints require ≥ 1.18.29; older v1 is rejected |
+| v2 | stable OpenCode ≥ 2.0.20 within major 2 | 2.0.20 | 2.0.19 and below sit below the initial v2 installation floor; other stable ≥ 2.0.20 versions are a supported configuration whose installer-level runtime checks have not been run here; as of 2026-10-14 a v2 live re-run is not reproducible from public distribution channels — the 2.0.20 evidence is historical |
 
 Unknown major versions and pre-release versions are rejected outright and never silently counted as supported. A version that merely matches the "ran on" column is evidence of installer-level checks only (role registration, prompt body, effective permissions, install/verify/uninstall loop — §7); it is **not** a claim of full release acceptance.
 
@@ -89,6 +89,7 @@ Distinguish fixture-unit evidence from real-host evidence. The optional live-hos
 
 - **Fixture suite** (`node --test`, 32 tests, isolated temp targets): additivity, idempotent reinstall, conflict aborts with zero writes, `--force` takeover with byte-exact backups, rollback recorded-byte restoration, uninstall reconciliation rules, cross-flavor manifest pinning, `.jsonc` shadow, drift handling, hard-link write-through protection (fixture twins), symlink conflicts, CLI exit codes/`--json`, merge semantics, version-boundary classification, rejected-version matrix (below the v2 floor, unknown majors, pre-releases), and explicit-host probing (`--host` + `--opencode` mismatch and nonzero-exit rejection; `--host` alone reported as version-not-verified offline format generation).
 - **Live v1 1.18.33** (`OCW_V1_BIN=$(which opencode) node --test`): both agents register (`debug agent <name>`), mode `subagent`, prompt body byte-identical to the source prompt, and the effective permission array shows the rendered map (`task: deny`, `webfetch: deny` for document-writer; `bash: allow`, `edit/write: deny`, `webfetch: allow`, `websearch: deny` for lark-operator).
+- **Live v1 1.18.35 (2026-10-14)**: the same assertions re-run from a clean `git archive HEAD` snapshot (commit `9c7578f`, the v3.1.0 tree) with `OCW_V1_BIN` at a real 1.18.35 binary and `node --test --test-name-pattern 'live v1'` — 1/1 pass (~5.4 s): verbatim prompt body and rendered permission map effective on the real isolated host, still **without the OMO plugin loaded**. The v2 live checks were not re-run — see the note in the host table above.
 - **Live v2 2.0.20** (isolated `OCW_V2_BIN=… node --test`): the real 2.0.20 host served in a fully isolated environment (own HOME/XDG/DB/plugin-cache; **zero model requests**; production untouched; **no OMO plugin installed**). `GET /api/agent` after session hydration: exactly **one** registration per role in that environment (no duplicate; since the plugin layer was not loaded there, this does not establish combined native+OMO precedence — owner-validated separately), `system` is the verbatim prompt body, and the effective `permissions` array carries the rendered v2 vocabulary (document-writer: `subagent`/`question`/`webfetch`/`websearch`/`gh_grep_*`/`context7_*` deny; lark-operator: `read`/`glob`/`grep`/`webfetch`/`shell` allow, `edit`/`write`/`subagent`/`question`/`websearch`/`apply_patch`/`ast_grep_replace` deny).
 - Known environment limit: the v2 CLI subcommand `debug agents` does not terminate in this sandbox (hangs with no output even outside an install), so the v2 live check drives the host server API instead — the same registration path the TUI uses.
 

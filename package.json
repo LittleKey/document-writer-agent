@@ -1,13 +1,39 @@
 {
   "name": "omo-coworkers",
-  "version": "3.1.0",
-  "private": true,
+  "version": "3.2.0",
   "type": "module",
   "description": "Additive multi-agent orchestration extension for oh-my-opencode-slim: daily-office workflows beyond code, shipped as a reversible overlay with a host-aware installer (OpenCode v1 >=1.18.29, v2 >=2.0.20)",
+  "license": "MIT",
+  "keywords": [
+    "opencode",
+    "oh-my-opencode-slim",
+    "agents",
+    "subagents",
+    "installer",
+    "llm"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/LittleKey/document-writer-agent.git"
+  },
+  "homepage": "https://github.com/LittleKey/document-writer-agent#readme",
+  "bugs": "https://github.com/LittleKey/document-writer-agent/issues",
   "bin": {
     "coworkers-install": "./bin/coworkers-install.mjs",
     "dw-install": "./bin/coworkers-install.mjs"
   },
+  "files": [
+    "bin",
+    "installer",
+    "prompts",
+    "skills",
+    "plugins",
+    "oh-my-opencode-slim.json",
+    "README.md",
+    "INSTALL.md",
+    "SOURCES.md",
+    "LICENSE"
+  ],
   "scripts": {
     "test": "node --test test/*.test.mjs"
   },
