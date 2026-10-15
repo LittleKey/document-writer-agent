@@ -50,7 +50,7 @@ coworkers-install rollback  --target ~/proj          # restore the exact pre-ins
 
 `coworkers-install` is the npm bin of the `omo-coworkers` package (run it as `npx coworkers-install …`); from a repository checkout, `node bin/coworkers-install.mjs …` is equivalent. The `dw-install` command remains as a compatibility alias pointing to the same script.
 
-Flags: `--host v1|v2` (skip detection), `--opencode <exe>` (detection executable, default `opencode` on PATH), `--target <dir>` (default cwd), `--global` (user-level install mode; mutually exclusive with `--target` — exit 1; §11), `--config-dir <dir>` (config dir for `--global`, default `$OPENCODE_CONFIG_HOME` or `~/.config/opencode`; §11), `--force`, `--json`. Exit codes: `0` ok · `1` usage · `2` conflict (nothing written) · `3` host detection failure · `4` no manifest (uninstall/rollback without an install).
+Flags: `--host v1|v2` (skip detection), `--opencode <exe>` (detection executable, default `opencode` on PATH), `--target <dir>` (default cwd), `--global` (user-level install mode; mutually exclusive with `--target` — exit 1; §11), `--config-dir <dir>` (config dir for `--global`, default `$OPENCODE_CONFIG_DIR` or `~/.config/opencode`; §11), `--force`, `--json`. Exit codes: `0` ok · `1` usage · `2` conflict (nothing written) · `3` host detection failure · `4` no manifest (uninstall/rollback without an install).
 
 Detection parses `semver` from `<exe> --version` (stdout+stderr). Requires Node ≥ 20.
 
@@ -118,7 +118,7 @@ The 3.1.0 plugin payload (§1 item 4) is new, and the rename-related steps of §
 
 ## 11. Global (user-level) install (3.3.0)
 
-`coworkers-install install|plan|verify|uninstall|rollback --global [--config-dir <dir>] [--force]` installs at user level instead of into a project. `--global` and `--target` are mutually exclusive (combining them is a usage error, exit 1). `--config-dir` is valid only with `--global` and defaults to `$OPENCODE_CONFIG_HOME` or `~/.config/opencode`.
+`coworkers-install install|plan|verify|uninstall|rollback --global [--config-dir <dir>] [--force]` installs at user level instead of into a project. `--global` and `--target` are mutually exclusive (combining them is a usage error, exit 1). `--config-dir` is valid only with `--global` and defaults to `$OPENCODE_CONFIG_DIR` or `~/.config/opencode`.
 
 What lands where, relative to the config dir:
 

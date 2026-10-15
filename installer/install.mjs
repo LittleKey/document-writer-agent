@@ -28,7 +28,9 @@ import { atomicWriteFileSync, isSymlinkPath } from "./atomic.mjs";
 import * as manifestMod from "./manifest.mjs";
 
 const PKG = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
-export const BASELINE = "3504f153fd4f09ae5b282bd223e19fc504ec2dfa";
+// Repo commit the packaged payload content (prompts, skills, plugin, overlay)
+// was last baselined from. Refresh whenever a release changes payload content.
+export const BASELINE = "b65cdcb3952d171b2d9eac2551177f1ba1e88616";
 
 function normalizeScope(scope) {
   return scope === "global" ? "global" : "project";
