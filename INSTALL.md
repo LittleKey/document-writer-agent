@@ -1,6 +1,6 @@
-# Install (omo-coworkers 3.2.0 — dual-host installer)
+# Install (omo-coworkers 3.3.0 — dual-host installer)
 
-The `omo-coworkers` package ships `bin/coworkers-install.mjs`, a host-aware additive installer (npm bin `coworkers-install`; the `dw-install` command is retained as a compatibility alias pointing to the same script). One command installs the two role agents and the three bundled skills into an OpenCode project on either host flavor, records a machine-readable manifest, and reverses its own writes — `uninstall` reverses managed content while intentionally preserving everything else, and `rollback` restores the recorded pre-install bytes of backed-up content; neither is an exact whole-filesystem reversal (§4). It never switches the preset, pins models, overwrites unrelated configuration, or writes through hard links.
+The `omo-coworkers` package ships `bin/coworkers-install.mjs`, a host-aware additive installer (npm bin `coworkers-install`; the `dw-install` command is retained as a compatibility alias pointing to the same script). One command installs the two role agents and the three bundled skills into an OpenCode project on either host flavor — or at user level with `--global` (§11) — records a machine-readable manifest, and reverses its own writes — `uninstall` reverses managed content while intentionally preserving everything else, and `rollback` restores the recorded pre-install bytes of backed-up content; neither is an exact whole-filesystem reversal (§4). It never switches the preset, pins models, overwrites unrelated configuration, or writes through hard links.
 
 Supported hosts, by what was actually run — keep the records distinct:
 
@@ -41,6 +41,7 @@ The full personal runtime still has machine-specific configuration, plugin artif
 ```sh
 coworkers-install install                            # auto-detect host from `opencode --version`
 coworkers-install install --host v2 --target ~/proj --opencode /path/to/opencode2
+coworkers-install install --global                      # user-level install into the OpenCode config dir (§11)
 coworkers-install plan      [...]                    # dry run — prints the artifact plan, writes nothing
 coworkers-install verify    --target ~/proj          # manifest vs disk hashes → ok | drift | missing
 coworkers-install uninstall --target ~/proj          # reverse everything the install wrote
@@ -49,7 +50,7 @@ coworkers-install rollback  --target ~/proj          # restore the exact pre-ins
 
 `coworkers-install` is the npm bin of the `omo-coworkers` package (run it as `npx coworkers-install …`); from a repository checkout, `node bin/coworkers-install.mjs …` is equivalent. The `dw-install` command remains as a compatibility alias pointing to the same script.
 
-Flags: `--host v1|v2` (skip detection), `--opencode <exe>` (detection executable, default `opencode` on PATH), `--target <dir>` (default cwd), `--force`, `--json`. Exit codes: `0` ok · `1` usage · `2` conflict (nothing written) · `3` host detection failure · `4` no manifest (uninstall/rollback without an install).
+Flags: `--host v1|v2` (skip detection), `--opencode <exe>` (detection executable, default `opencode` on PATH), `--target <dir>` (default cwd), `--global` (user-level install mode; mutually exclusive with `--target` — exit 1; §11), `--config-dir <dir>` (config dir for `--global`, default `$OPENCODE_CONFIG_HOME` or `~/.config/opencode`; §11), `--force`, `--json`. Exit codes: `0` ok · `1` usage · `2` conflict (nothing written) · `3` host detection failure · `4` no manifest (uninstall/rollback without an install).
 
 Detection parses `semver` from `<exe> --version` (stdout+stderr). Requires Node ≥ 20.
 
@@ -114,3 +115,26 @@ The 3.0.0 installer tracks only the new names. An existing ≤2.x install must t
 ## 10. Upgrading from 3.0.0
 
 The 3.1.0 plugin payload (§1 item 4) is new, and the rename-related steps of §9 already covered older targets. Verified in-place path (2026-10-14): reinstalling 3.1.0 over an existing 3.0.0 install whose manifest lacks the plugin record proceeded without conflict — reinstall reported the 25 existing files `unchanged` plus one `create` for `.opencode/plugins/claude-advisor.mjs`, and a following `verify` reported ok 26 · drift 0 · missing 0, with the regenerated manifest ending in the plugin record. Clean alternative: `uninstall` the 3.0.0 install first, then run a fresh 3.1.0 install.
+
+## 11. Global (user-level) install (3.3.0)
+
+`coworkers-install install|plan|verify|uninstall|rollback --global [--config-dir <dir>] [--force]` installs at user level instead of into a project. `--global` and `--target` are mutually exclusive (combining them is a usage error, exit 1). `--config-dir` is valid only with `--global` and defaults to `$OPENCODE_CONFIG_HOME` or `~/.config/opencode`.
+
+What lands where, relative to the config dir:
+
+- Prompt bodies → `oh-my-opencode-slim/<role>.md`, verbatim copies of the repo prompts.
+- The three skills → `skills/<name>/` (plural, host-native layout).
+- Overlay → `oh-my-opencode-slim.json`: created wholesale if absent; additively merged if present but free of managed agent keys; **preserved completely untouched — even with `--force`** — with a recorded notice when it already defines `document-writer` or `lark-operator` (owner-curated config is never rewritten in global mode).
+- The claude-advisor plugin is **never** installed in global mode: user-level auto-load would require an explicit `plugin` entry in the owner's `opencode.json`, and the installer does not edit personal config. The skip is recorded as a notice; the plugin stays project-scoped (§1 item 4).
+- Manifest → `omo-coworkers-install.json` in the config dir — same schemaVersion 1 — gaining `scope: "global" | "project"` (absent reads as project) and an advisory `notices[]` array that `verify` re-surfaces.
+- Backups → `omo-coworkers-backup/<stamp>/` in the config dir.
+
+Pre-existing files or directories that are byte-identical to the payload are **adopted** (zero writes, hash recorded) rather than rewritten or flagged as conflicts. Also fixed in 3.3.0 for both modes: `uninstall` of an overlay the installer itself *created* now hash-gate-deletes the whole file instead of unmerging (previously a created overlay's uninstall left a `$schema`-only residue).
+
+v2 hosts use the same global surfaces; the recorded global-mode evidence is a v1 real-host run (§7), with v2 covered by fixtures — the host table's "v2 evidence historical" framing is unchanged.
+
+Operational notes:
+
+- After a global prompt update, a running OpenCode server may keep the previously loaded prompts until it is restarted.
+- A host-native `agents/<role>.md`/`.markdown` file the user created earlier overrides the OMO prompt file for that role. Reconcile by hand if needed: preserve the file's frontmatter (e.g. `mode`/`description`/`model`/`variant`) and replace only the body with the repo prompt — the installer never touches those files (observed 2026-10-15: the owner's old `lark-operator.md` body kept winning until manually reconciled; see SOURCES.md).
+- Probing subagents: `opencode run --agent <role>` in v1 falls back to the default agent for subagent roles ("agent '<role>' is a subagent, not a primary agent"); subagent prompts are not directly probeable this way. This corrects the inference drawn from the 2026-10-14 project E2E (§7), whose valid signals (clean session spawn with the overlay, project skills in the available-skills list) stand.

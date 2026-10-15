@@ -28,6 +28,22 @@ export const ROLES = ["document-writer", "lark-operator"];
 export const MANIFEST_NAME = "omo-coworkers-install.json";
 export const OVERLAY_PROJECT = ".opencode/oh-my-opencode-slim.json";
 
+// Global (user-level) install layout, resolved against the OpenCode config
+// directory (~/.config/opencode). The host natively reads user-level agents
+// from {agent,agents}/ and skills from {skill,skills}/; OMO 3.0.x resolves a
+// custom agent's prompt body from <configDir>/oh-my-opencode-slim/<role>.md
+// (file beats builtin fallback) and the agent DEFINITIONS from
+// <configDir>/oh-my-opencode-slim.json `agents` keys. Prompt bodies are the
+// verbatim repo prompts (no frontmatter — these are OMO prompt-body files, not
+// native agent definitions), and skills use the plural `skills/` convention.
+// The claude-advisor plugin is NOT part of the global payload: user-level
+// plugins auto-load only from <configDir>/{plugin,plugins}/*.  {ts,js} one
+// level deep, so a subdirectory payload would need an explicit `plugin` entry
+// in the owner's personal opencode.json, which this installer never edits.
+export const GLOBAL_PROMPT_DIR = "oh-my-opencode-slim";
+export const OVERLAY_GLOBAL = "oh-my-opencode-slim.json";
+export const GLOBAL_SKILL_DIR = "skills";
+
 // Managed plugin payload — a single loose file, identical for both host
 // flavors: OpenCode auto-loads project plugins from `.opencode/plugins/` at
 // startup (official convention, https://opencode.ai/docs/plugins). Layout
@@ -151,6 +167,30 @@ function listFilesRecursive(dir) {
   return out.sort();
 }
 
+function collectSkillFiles(packageRoot, skillDir) {
+  const skillsRoot = join(packageRoot, "skills");
+  const skillIds = readdirSync(skillsRoot, { withFileTypes: true })
+    .filter((e) => e.isDirectory())
+    .map((e) => e.name)
+    .sort();
+  const files = [];
+  for (const id of skillIds) {
+    const abs = join(skillsRoot, id);
+    for (const file of listFilesRecursive(abs)) {
+      const rel = relative(packageRoot, file).split(sep).join("/");
+      files.push({
+        path: `${skillDir}/${id}/${relative(abs, file).split(sep).join("/")}`,
+        action: "create",
+        kind: "skill",
+        skill: id,
+        source: rel,
+        sha256: sha256(statSync(file).isFile() ? readFileSync(file) : Buffer.alloc(0)),
+      });
+    }
+  }
+  return { files, skillIds };
+}
+
 /**
  * Build the full artifact plan for one host flavor.
  * Returns { host, files: [{path (relative to target), action, content?,
@@ -183,26 +223,8 @@ export function renderPlan({ packageRoot, host, overlay }) {
     });
   }
 
-  const skillsRoot = join(packageRoot, "skills");
-  const skillIds = readdirSync(skillsRoot, { withFileTypes: true })
-    .filter((e) => e.isDirectory())
-    .map((e) => e.name)
-    .sort();
-  for (const id of skillIds) {
-    const abs = join(skillsRoot, id);
-    for (const file of listFilesRecursive(abs)) {
-      const rel = relative(packageRoot, file).split(sep).join("/");
-      const targetRel = `${skillDir}/${id}/${relative(abs, file).split(sep).join("/")}`;
-      files.push({
-        path: targetRel,
-        action: "create",
-        kind: "skill",
-        skill: id,
-        source: rel,
-        sha256: sha256(statSync(file).isFile() ? readFileSync(file) : Buffer.alloc(0)),
-      });
-    }
-  }
+  const { files: skillFiles, skillIds } = collectSkillFiles(packageRoot, skillDir);
+  files.push(...skillFiles);
 
   // plugin payload: same managed path on either flavor (see PLUGIN_PAYLOAD)
   files.push({
@@ -222,6 +244,43 @@ export function renderPlan({ packageRoot, host, overlay }) {
     skillDir,
     manifestName: MANIFEST_NAME,
     overlayProject: OVERLAY_PROJECT,
+    scope: "project",
+  };
+}
+
+/**
+ * Build the artifact plan for a GLOBAL (user-level) install into the OpenCode
+ * config directory. Paths are relative to the config directory. The payload is
+ * host-flavor-independent: prompt bodies are the verbatim repo prompts placed
+ * where OMO 3.0.x resolves them (<configDir>/oh-my-opencode-slim/<role>.md),
+ * skills land under the plural `skills/` host convention, and no plugin or
+ * native agent .md files are rendered (see the consts above).
+ */
+export function renderGlobalPlan({ packageRoot, overlay }) {
+  const files = [];
+  for (const role of ROLES) {
+    const body = readRoleBody(packageRoot, role);
+    files.push({
+      path: `${GLOBAL_PROMPT_DIR}/${role}.md`,
+      action: "create",
+      kind: "role-prompt",
+      role,
+      content: body,
+      sha256: sha256(Buffer.from(body)),
+      sourceAuthority: `prompts/${role}.md`,
+    });
+  }
+  const { files: skillFiles, skillIds } = collectSkillFiles(packageRoot, GLOBAL_SKILL_DIR);
+  files.push(...skillFiles);
+  return {
+    files,
+    overlay,
+    skillIds,
+    agentDir: null,
+    skillDir: GLOBAL_SKILL_DIR,
+    manifestName: MANIFEST_NAME,
+    overlayProject: OVERLAY_GLOBAL,
+    scope: "global",
   };
 }
 

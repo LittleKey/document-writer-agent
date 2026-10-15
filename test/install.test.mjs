@@ -937,6 +937,291 @@ test("symlink at managed path is a conflict — link boundaries stay with the ow
   }
 });
 
+// --- global (user-level) install mode ------------------------------------------
+// Global mode installs into the OpenCode config directory (~/.config/opencode
+// or --config-dir): prompt bodies under oh-my-opencode-slim/, skills under the
+// plural skills/, agent definitions additively into oh-my-opencode-slim.json.
+// No plugin, no native agent .md rendering; the payload is flavor-independent.
+
+const GLOBAL_PROMPT_DIR = "oh-my-opencode-slim";
+const REPO_OVERLAY = JSON.parse(readFileSync(join(REPO_ROOT, "oh-my-opencode-slim.json"), "utf8"));
+const BUNDLED_SKILLS = ["domain-modeling", "humanizer", "maintaining-product-engineering-docs"];
+
+function makeGlobalConfigDir({ withOverlay = false, managedKey = null, withDecoyAgent = false, withOwnerSkill = false } = {}) {
+  const cfg = mkdtempSync(join(tmpdir(), "ocw-global-test-"));
+  if (withOverlay) {
+    const agents = {
+      "personal-reviewer": { description: "owner agent", skills: ["personal-skill"] },
+    };
+    if (managedKey) agents[managedKey] = { description: "owner-curated co-worker", model: "owner-model" };
+    writeFileSync(
+      join(cfg, "oh-my-opencode-slim.json"),
+      `${JSON.stringify({ $schema: "https://example.invalid/oh-my-opencode-slim.schema.json", presets: { keep: true }, agents }, null, 2)}\n`,
+    );
+  }
+  if (withDecoyAgent) {
+    // simulates the owner's host-native agents/<role>.md personal file
+    mkdirSync(join(cfg, "agents"), { recursive: true });
+    writeFileSync(join(cfg, "agents", "lark-operator.md"), "---\ndescription: owner native agent\nmode: subagent\n---\nowner body\n");
+  }
+  if (withOwnerSkill) {
+    mkdirSync(join(cfg, "skills", "owner-skill"), { recursive: true });
+    writeFileSync(join(cfg, "skills", "owner-skill", "SKILL.md"), "---\nname: owner-skill\n---\nowner content\n");
+  }
+  writeFileSync(join(cfg, "unrelated.txt"), "owner file\n");
+  return cfg;
+}
+
+test("global: fresh install writes prompt bodies, skills, creates the overlay, and records scope global", async () => {
+  const cfg = makeGlobalConfigDir();
+  try {
+    const { manifest } = await install({ packageRoot: REPO_ROOT, target: cfg, scope: "global", host: "v1" });
+
+    for (const role of ROLES) {
+      const abs = join(cfg, GLOBAL_PROMPT_DIR, `${role}.md`);
+      assert.equal(
+        readFileSync(abs, "utf8"),
+        readFileSync(join(REPO_ROOT, "prompts", `${role}.md`), "utf8").replace(/\n*$/, "\n"),
+        `global ${role} prompt body is the verbatim prompt (no frontmatter rendering)`,
+      );
+    }
+    for (const id of BUNDLED_SKILLS) {
+      assert.equal(
+        readFileSync(join(cfg, "skills", id, "SKILL.md"), "utf8"),
+        readFileSync(join(REPO_ROOT, "skills", id, "SKILL.md"), "utf8"),
+        `skill ${id} copied verbatim under the plural skills/ dir`,
+      );
+    }
+    const overlay = JSON.parse(readFileSync(join(cfg, "oh-my-opencode-slim.json"), "utf8"));
+    assert.deepEqual(overlay, { $schema: REPO_OVERLAY.$schema, agents: REPO_OVERLAY.agents }, "created overlay is the shipped agents block (+ its $schema)");
+    for (const key of MANAGED_AGENT_KEYS) assert.ok(overlay.agents[key], `overlay has agents.${key}`);
+
+    assert.equal(manifest.scope, "global");
+    assert.equal(manifest.schemaVersion, 1);
+    assert.equal(manifest.host.flavor, "v1");
+    assert.equal(manifestMod.readManifest(cfg), null, "no project manifest lives in a global config dir");
+    assert.ok(manifest.files.every((f) => !f.path.startsWith(".opencode")), "no project-prefixed paths in global mode");
+    assert.ok(!manifest.files.some((f) => f.kind === "plugin"), "global mode never installs the plugin");
+    assert.ok(manifest.notices.some((n) => n.includes("claude-advisor")), "plugin skip surfaced as a manifest notice");
+    assert.ok(manifest.backupRoot.startsWith("omo-coworkers-backup/"), "backup root sits directly under the config dir");
+
+    const check = verify({ target: cfg, scope: "global" });
+    assert.equal(check.drift.length, 0);
+    assert.equal(check.missing.length, 0);
+    assert.equal(check.scope, "global");
+  } finally {
+    rmSync(cfg, { recursive: true, force: true });
+  }
+});
+
+test("global: existing overlay without managed keys is merged additively; unrelated keys preserved", async () => {
+  const cfg = makeGlobalConfigDir({ withOverlay: true });
+  try {
+    const originalBytes = readFileSync(join(cfg, "oh-my-opencode-slim.json"));
+    const { manifest } = await install({ packageRoot: REPO_ROOT, target: cfg, scope: "global", host: "v1" });
+
+    const overlay = JSON.parse(readFileSync(join(cfg, "oh-my-opencode-slim.json"), "utf8"));
+    assert.deepEqual(overlay.presets, { keep: true }, "unrelated top-level key preserved");
+    assert.deepEqual(
+      overlay.agents["personal-reviewer"],
+      { description: "owner agent", skills: ["personal-skill"] },
+      "unrelated agent preserved field-for-field",
+    );
+    for (const key of MANAGED_AGENT_KEYS) {
+      assert.deepEqual(overlay.agents[key], REPO_OVERLAY.agents[key], `agents.${key} matches the shipped block`);
+    }
+    assert.equal(manifest.overlay.action, "merge");
+    assert.ok(manifest.overlay.backup, "pre-merge overlay backed up");
+    assert.deepEqual(readFileSync(join(cfg, manifest.overlay.backup)), originalBytes, "backup is byte-exact");
+  } finally {
+    rmSync(cfg, { recursive: true, force: true });
+  }
+});
+
+test("global: overlay already managing a co-worker agent is never modified; notices record the preserved keys", async () => {
+  const cfg = makeGlobalConfigDir({ withOverlay: true, managedKey: "document-writer" });
+  try {
+    const before = snapshot(cfg);
+    const { manifest } = await install({ packageRoot: REPO_ROOT, target: cfg, scope: "global", host: "v1" });
+    const after = snapshot(cfg);
+
+    assert.equal(after["oh-my-opencode-slim.json"], before["oh-my-opencode-slim.json"], "owner overlay byte-untouched");
+    assert.equal(manifest.overlay.action, "preserve");
+    assert.deepEqual(manifest.overlay.preserved, ["document-writer"]);
+    assert.ok(
+      manifest.notices.some((n) => n.includes("document-writer") && n.includes("preserved")),
+      "manifest notice names the preserved owner entries",
+    );
+    assert.ok(existsSync(join(cfg, GLOBAL_PROMPT_DIR, "document-writer.md")), "prompt bodies still installed");
+    assert.ok(existsSync(join(cfg, "skills", "domain-modeling", "SKILL.md")), "skills still installed");
+    assert.equal(verify({ target: cfg, scope: "global" }).drift.length, 0, "install is consistent even with a preserved overlay");
+  } finally {
+    rmSync(cfg, { recursive: true, force: true });
+  }
+});
+
+test("global: byte-identical pre-existing skill dir is adopted with zero writes; uninstall removes it", async () => {
+  const cfg = makeGlobalConfigDir();
+  try {
+    const skillAbs = join(cfg, "skills", "domain-modeling", "SKILL.md");
+    mkdirSync(dirname(skillAbs), { recursive: true });
+    writeFileSync(skillAbs, readFileSync(join(REPO_ROOT, "skills", "domain-modeling", "SKILL.md")));
+    const statBefore = statSync(skillAbs);
+
+    const { manifest } = await install({ packageRoot: REPO_ROOT, target: cfg, scope: "global", host: "v1" });
+    const rec = manifest.files.find((f) => f.path === "skills/domain-modeling/SKILL.md");
+    assert.equal(rec.action, "adopted", "identical payload adopted, not rewritten");
+    assert.equal(rec.sha256Installed, sha256(readFileSync(skillAbs)), "manifest records the payload hash for the adopted path");
+    const statAfter = statSync(skillAbs);
+    assert.equal(statAfter.ino, statBefore.ino, "adopted file never rewritten (same inode)");
+    assert.equal(statAfter.mtimeMs, statBefore.mtimeMs, "adopted file mtime untouched (zero writes)");
+
+    // the other skills were written normally
+    const written = manifest.files.find((f) => f.path === "skills/humanizer/SKILL.md");
+    assert.equal(written.action, "create");
+
+    const unl = uninstall({ target: cfg, scope: "global" });
+    assert.ok(unl.removed.includes("skills/domain-modeling/SKILL.md"), "adopted path is recorded, so uninstall removes it");
+    assert.ok(!existsSync(join(cfg, "skills", "domain-modeling")), "adopted skill dir pruned");
+    assert.equal(unl.manifestRemoved, true);
+  } finally {
+    rmSync(cfg, { recursive: true, force: true });
+  }
+});
+
+test("global: differing prompt file conflicts; --force backs up under omo-coworkers-backup and rollback round-trips", async () => {
+  const cfg = makeGlobalConfigDir();
+  try {
+    const rel = `${GLOBAL_PROMPT_DIR}/document-writer.md`;
+    const abs = join(cfg, GLOBAL_PROMPT_DIR, "document-writer.md");
+    mkdirSync(dirname(abs), { recursive: true });
+    const ownerBody = "# owner's custom document-writer prompt\n";
+    writeFileSync(abs, ownerBody);
+    const before = snapshot(cfg);
+
+    await assert.rejects(
+      () => install({ packageRoot: REPO_ROOT, target: cfg, scope: "global", host: "v1" }),
+      (err) => err instanceof ConflictError && err.code === 2 && err.report.some((l) => l.includes(rel)),
+    );
+    assert.deepEqual(snapshot(cfg), before, "conflict wrote nothing");
+
+    const { manifest } = await install({ packageRoot: REPO_ROOT, target: cfg, scope: "global", host: "v1", force: true });
+    const rec = manifest.files.find((f) => f.path === rel);
+    assert.equal(rec.action, "replace");
+    assert.ok(rec.backup.startsWith("omo-coworkers-backup/"), `backup under the global backup root: ${rec.backup}`);
+    assert.equal(readFileSync(join(cfg, rec.backup), "utf8"), ownerBody, "owner prompt backed up byte-exact");
+
+    // drift-gated rollback: post-install edits block their own restore
+    writeFileSync(abs, "# owner edit after install\n");
+    const rb = rollback({ target: cfg, scope: "global" });
+    assert.ok(rb.blocked.includes(rel), "drifted prompt blocks its own restore");
+    assert.equal(readFileSync(abs, "utf8"), "# owner edit after install\n", "drifted bytes untouched");
+    assert.ok(manifestMod.readManifest(cfg, "global"), "manifest retained while reconciliation is pending");
+
+    // reconciled: restore the recorded installed bytes, rollback completes
+    writeFileSync(abs, readFileSync(join(cfg, rec.backup)));
+    const rb2 = rollback({ target: cfg, scope: "global" });
+    assert.equal(rb2.blocked.length, 0, "rollback completes after reconciliation");
+    assert.equal(readFileSync(abs, "utf8"), ownerBody, "owner bytes restored exactly");
+    assert.ok(!existsSync(join(cfg, "omo-coworkers-install.json")), "manifest removed by completed rollback");
+    assert.ok(!existsSync(join(cfg, "omo-coworkers-backup")), "backup records removed");
+  } finally {
+    rmSync(cfg, { recursive: true, force: true });
+  }
+});
+
+test("global: uninstall and rollback reverse our files and leave owner files intact", async () => {
+  const cfg = makeGlobalConfigDir({ withDecoyAgent: true, withOwnerSkill: true });
+  const decoy = "---\ndescription: owner native agent\nmode: subagent\n---\nowner body\n";
+  try {
+    await install({ packageRoot: REPO_ROOT, target: cfg, scope: "global", host: "v1" });
+    const unl = uninstall({ target: cfg, scope: "global" });
+
+    assert.ok(unl.removed.includes(`${GLOBAL_PROMPT_DIR}/document-writer.md`));
+    assert.ok(unl.removed.includes(`${GLOBAL_PROMPT_DIR}/lark-operator.md`));
+    assert.ok(!existsSync(join(cfg, GLOBAL_PROMPT_DIR)), "our created prompt dir pruned when empty");
+    assert.ok(!existsSync(join(cfg, "oh-my-opencode-slim.json")), "created overlay removed by uninstall");
+    assert.equal(readFileSync(join(cfg, "agents", "lark-operator.md"), "utf8"), decoy, "owner native agent md untouched");
+    assert.ok(existsSync(join(cfg, "agents")), "owner agents dir survives");
+    assert.ok(existsSync(join(cfg, "skills", "owner-skill", "SKILL.md")), "owner skill untouched");
+    assert.ok(existsSync(join(cfg, "skills")), "skills dir kept while an owner skill lives there");
+    assert.equal(unl.manifestRemoved, true);
+
+    // rollback path on a fresh install
+    await install({ packageRoot: REPO_ROOT, target: cfg, scope: "global", host: "v1" });
+    const rb = rollback({ target: cfg, scope: "global" });
+    assert.equal(rb.blocked.length, 0);
+    assert.ok(!existsSync(join(cfg, GLOBAL_PROMPT_DIR)));
+    assert.ok(!existsSync(join(cfg, "oh-my-opencode-slim.json")), "created overlay deleted by rollback");
+    assert.ok(!existsSync(join(cfg, "omo-coworkers-install.json")), "manifest removed after clean rollback");
+    assert.equal(readFileSync(join(cfg, "agents", "lark-operator.md"), "utf8"), decoy, "decoy intact after rollback");
+    assert.ok(existsSync(join(cfg, "skills", "owner-skill", "SKILL.md")));
+  } finally {
+    rmSync(cfg, { recursive: true, force: true });
+  }
+});
+
+test("global: v1 and v2 resolve the identical payload (flavor does not gate global mode)", async () => {
+  const cfg1 = makeGlobalConfigDir();
+  const cfg2 = makeGlobalConfigDir();
+  try {
+    const p1 = await plan({ packageRoot: REPO_ROOT, target: cfg1, scope: "global", host: "v1" });
+    const p2 = await plan({ packageRoot: REPO_ROOT, target: cfg2, scope: "global", host: "v2" });
+    const norm = (p) => p.entries.map((e) => `${e.path} ${e.action} ${e.sha256}`).sort();
+    assert.deepEqual(norm(p2), norm(p1), "same paths and payload hashes for both flavors");
+  } finally {
+    rmSync(cfg1, { recursive: true, force: true });
+    rmSync(cfg2, { recursive: true, force: true });
+  }
+});
+
+test("CLI global: --global with --target exits 1; --config-dir without --global exits 1", async () => {
+  const scratch = mkdtempSync(join(tmpdir(), "ocw-global-scratch-"));
+  try {
+    await assert.rejects(
+      () => run(process.execPath, [CLI, "plan", "--global", "--target", scratch, "--json"]),
+      (err) => err.code === 1,
+    );
+    await assert.rejects(
+      () => run(process.execPath, [CLI, "plan", "--config-dir", scratch, "--json"]),
+      (err) => err.code === 1,
+    );
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+});
+
+test("CLI global: v2-probed install/verify/uninstall round-trip on a config dir", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "ocw-exe-"));
+  const cfg = makeGlobalConfigDir({ withOverlay: true });
+  try {
+    const exe = fakeExe(dir, "oc", "opencode v2.0.20");
+    const ins = JSON.parse((await run(process.execPath, [CLI, "install", "--global", "--config-dir", cfg, "--opencode", exe, "--json"])).stdout);
+    assert.equal(ins.ok, true);
+    assert.equal(ins.scope, "global");
+    assert.equal(ins.host.flavor, "v2", "the v2 --opencode stub drives detection, not the payload");
+    assert.equal(ins.manifest, "omo-coworkers-install.json");
+    assert.ok(ins.notices.some((n) => n.includes("claude-advisor")), "plugin-skip notice surfaced in CLI output");
+
+    const ver = JSON.parse((await run(process.execPath, [CLI, "verify", "--global", "--config-dir", cfg, "--json"])).stdout);
+    assert.equal(ver.drift.length, 0);
+    assert.equal(ver.missing.length, 0);
+
+    const unl = JSON.parse((await run(process.execPath, [CLI, "uninstall", "--global", "--config-dir", cfg, "--json"])).stdout);
+    assert.equal(unl.ok, true);
+    assert.equal(unl.manifestRemoved, true);
+
+    // uninstall twice -> exit 4 (no global manifest)
+    await assert.rejects(
+      () => run(process.execPath, [CLI, "uninstall", "--global", "--config-dir", cfg, "--json"]),
+      (err) => err.code === 4,
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(cfg, { recursive: true, force: true });
+  }
+});
+
 // --- CLI end-to-end ------------------------------------------------------------
 
 const CLI = join(REPO_ROOT, "bin", "coworkers-install.mjs");

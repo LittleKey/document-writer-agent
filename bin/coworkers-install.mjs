@@ -2,30 +2,46 @@
 // coworkers-install — host-aware additive installer for the omo-coworkers package.
 //
 // Usage:
-//   coworkers-install install   [--host v1|v2] [--opencode <exe>] [--target <dir>] [--force] [--json]
+//   coworkers-install install   [--host v1|v2] [--opencode <exe>] ([--target <dir>] | --global [--config-dir <dir>]) [--force] [--json]
 //   coworkers-install plan      [same flags]                              (dry run)
-//   coworkers-install uninstall --target <dir> [--json]
-//   coworkers-install rollback  --target <dir> [--json]
-//   coworkers-install verify    --target <dir> [--json]
+//   coworkers-install uninstall (--target <dir> | --global [--config-dir <dir>]) [--json]
+//   coworkers-install rollback  (--target <dir> | --global [--config-dir <dir>]) [--json]
+//   coworkers-install verify    (--target <dir> | --global [--config-dir <dir>]) [--json]
 //
 // Exit codes: 0 ok · 1 usage · 2 conflict (nothing written) · 3 host detection
 // failed · 4 no install manifest found.
 
-import { resolve } from "node:path";
+import { resolve, join } from "node:path";
+import { homedir } from "node:os";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { install, plan, uninstall, rollback, verify, ConflictError, BASELINE } from "../installer/install.mjs";
 
 const PACKAGE_ROOT = fileURLToPath(new URL("..", import.meta.url));
+const VERSION = JSON.parse(readFileSync(fileURLToPath(new URL("../package.json", import.meta.url)), "utf8")).version;
 
 function usage(code = 1, message) {
-  const text = `coworkers-install — omo-coworkers ${"3.2.0"} host-aware additive installer
+  const text = `coworkers-install — omo-coworkers ${VERSION} host-aware additive installer
 
 Usage:
-  coworkers-install install   [--host v1|v2] [--opencode <exe>] [--target <dir>] [--force] [--json]
+  coworkers-install install   [--host v1|v2] [--opencode <exe>] [--target <dir> | --global [--config-dir <dir>]] [--force] [--json]
   coworkers-install plan      [...]                                  dry run, writes nothing
-  coworkers-install uninstall --target <dir> [--json]
-  coworkers-install rollback  --target <dir> [--json]
-  coworkers-install verify    --target <dir> [--json]
+  coworkers-install uninstall [--target <dir> | --global [--config-dir <dir>]] [--json]
+  coworkers-install rollback  [--target <dir> | --global [--config-dir <dir>]] [--json]
+  coworkers-install verify    [--target <dir> | --global [--config-dir <dir>]] [--json]
+
+Scope:
+  --target <dir>     Project-scoped install into <dir>/.opencode/ (default
+                     target: current directory).
+  --global           User-scoped install into the OpenCode config directory:
+                     prompt bodies under oh-my-opencode-slim/, skills under
+                     skills/, agent definitions merged additively into
+                     oh-my-opencode-slim.json (never installed: the
+                     claude-advisor plugin — user-level plugin auto-load
+                     requires a manual \`plugin\` entry in your opencode.json).
+                     Mutually exclusive with --target.
+  --config-dir <dir> OpenCode config directory for --global (default:
+                     $OPENCODE_CONFIG_DIR, else ~/.config/opencode).
 
 Options:
   --host <v1|v2>     OpenCode host flavor. Omit to auto-detect from
@@ -37,11 +53,11 @@ Options:
                      is probed and a flavor mismatch aborts (exit 3).
   --opencode <exe>   OpenCode executable used for detection
                      (default: "opencode" on PATH).
-  --target <dir>     Project directory to install into (default: cwd).
   --force            Take over conflicting files, recording byte-exact backups
                      first. Without it, conflicts abort before any write.
-  --json             Machine-readable JSON result (manifest is always written
-                     as <target>/.opencode/omo-coworkers-install.json).
+  --json             Machine-readable JSON result (project manifest is always
+                     written as <target>/.opencode/omo-coworkers-install.json;
+                     global manifest as <configDir>/omo-coworkers-install.json).
 
 Package baseline: ${BASELINE}`;
   if (message) console.error(`error: ${message}`);
@@ -56,6 +72,8 @@ function parseArgs(argv) {
     if (a === "--host") opts.host = argv[++i];
     else if (a === "--opencode") opts.opencode = argv[++i];
     else if (a === "--target") opts.target = argv[++i];
+    else if (a === "--global") opts.global = true;
+    else if (a === "--config-dir") opts.configDir = argv[++i];
     else if (a === "--force") opts.force = true;
     else if (a === "--json") opts.json = true;
     else if (a === "-h" || a === "--help") usage(0);
@@ -63,6 +81,12 @@ function parseArgs(argv) {
   }
   if (opts.host && opts.host !== "v1" && opts.host !== "v2") {
     usage(1, `--host must be "v1" or "v2", got ${JSON.stringify(opts.host)}`);
+  }
+  if (opts.global && opts.target) {
+    usage(1, "--global and --target are mutually exclusive");
+  }
+  if (opts.configDir && !opts.global) {
+    usage(1, "--config-dir requires --global (project scope has no config dir)");
   }
   return opts;
 }
@@ -79,7 +103,19 @@ function fail(code, message) {
 
 async function main() {
   const opts = parseArgs(process.argv.slice(2));
-  const target = resolve(opts.target ?? process.cwd());
+  const scope = opts.global ? "global" : "project";
+  // project: --target or cwd; global: --config-dir, else $OPENCODE_CONFIG_DIR,
+  // else ~/.config/opencode
+  const target = opts.global
+    ? resolve(opts.configDir ?? process.env.OPENCODE_CONFIG_DIR ?? join(homedir(), ".config", "opencode"))
+    : resolve(opts.target ?? process.cwd());
+  const manifestRel = scope === "global" ? "omo-coworkers-install.json" : ".opencode/omo-coworkers-install.json";
+  const scopeFlags =
+    scope === "global"
+      ? opts.configDir
+        ? `--global --config-dir ${target}`
+        : "--global"
+      : `--target ${target}`;
 
   switch (opts.command) {
     case "install":
@@ -90,6 +126,7 @@ async function main() {
         result = await run({
           packageRoot: PACKAGE_ROOT,
           target,
+          scope,
           host: opts.host,
           opencode: opts.opencode,
           force: opts.force,
@@ -110,19 +147,23 @@ async function main() {
               ok: true,
               dryRun: true,
               target,
+              scope,
               host: result.host,
               files: result.entries.map((e) => ({ path: e.path, action: e.action, kind: e.kind, role: e.role, skill: e.skill })),
               overlay: { path: result.overlay.path, action: result.overlay.action },
+              notices: result.notices,
             }
           : {
               ok: true,
               target,
+              scope,
               host: result.manifest.host,
               files: result.manifest.files,
               overlay: result.manifest.overlay,
-              manifest: ".opencode/omo-coworkers-install.json",
+              manifest: manifestRel,
               skills: result.manifest.skills,
               promptAuthority: result.manifest.promptAuthority,
+              notices: result.manifest.notices ?? [],
             };
       if (!emit(opts, summary)) {
         const flavor = summary.host.flavor;
@@ -137,14 +178,17 @@ async function main() {
         } else {
           hostLine = `host: ${flavor}${version}`;
         }
-        console.log(hostLine);
+        console.log(`${hostLine} · scope: ${scope}`);
         for (const f of summary.files) {
-          console.log(`  ${f.action.padEnd(9)} ${f.path}`);
+          const label = f.action === "adopted" ? "adopt" : f.action;
+          const suffix = label === "adopt" ? "  (already present (identical))" : "";
+          console.log(`  ${label.padEnd(9)} ${f.path}${suffix}`);
         }
         console.log(`  ${summary.overlay.action.padEnd(9)} ${summary.overlay.path}`);
+        for (const n of summary.notices ?? []) console.log(`notice: ${n}`);
         if (opts.command === "install") {
-          console.log(`manifest: ${summary.manifest}`);
-          console.log(`uninstall: coworkers-install uninstall --target ${target}`);
+          console.log(`manifest: ${manifestRel}`);
+          console.log(`uninstall: coworkers-install uninstall ${scopeFlags}`);
         }
       }
       break;
@@ -154,7 +198,12 @@ async function main() {
     case "verify": {
       let result;
       try {
-        result = opts.command === "uninstall" ? uninstall({ target }) : opts.command === "rollback" ? rollback({ target }) : verify({ target });
+        result =
+          opts.command === "uninstall"
+            ? uninstall({ target, scope })
+            : opts.command === "rollback"
+              ? rollback({ target, scope })
+              : verify({ target, scope });
       } catch (err) {
         fail(err.code ?? 1, err.message);
       }
@@ -163,6 +212,7 @@ async function main() {
           console.log(`ok: ${result.ok.length} · drift: ${result.drift.length} · missing: ${result.missing.length}`);
           for (const d of result.drift) console.log(`  drift   ${d}`);
           for (const m of result.missing) console.log(`  missing ${m}`);
+          for (const n of result.notices ?? []) console.log(`notice: ${n}`);
         } else {
           for (const r of result.restored ?? []) console.log(`  restored ${r}`);
           for (const d of result.removed ?? []) console.log(`  removed  ${d}`);

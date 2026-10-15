@@ -22,13 +22,32 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync, readdirSync, rmdirSync } from "node:fs";
 import { join, dirname, resolve } from "node:path";
 import { probeExecutable } from "./detect.mjs";
-import { renderPlan, sha256, MANIFEST_NAME } from "./render.mjs";
+import { renderPlan, renderGlobalPlan, sha256, MANIFEST_NAME } from "./render.mjs";
 import { mergeOverlay, unmergeOverlay, stringifyJson, MANAGED_AGENT_KEYS } from "./merge.mjs";
 import { atomicWriteFileSync, isSymlinkPath } from "./atomic.mjs";
 import * as manifestMod from "./manifest.mjs";
 
 const PKG = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 export const BASELINE = "3504f153fd4f09ae5b282bd223e19fc504ec2dfa";
+
+function normalizeScope(scope) {
+  return scope === "global" ? "global" : "project";
+}
+
+/** Backup root, relative to target (project: under .opencode; global: under the config dir). */
+function backupRootRel(scope) {
+  return normalizeScope(scope) === "global" ? "omo-coworkers-backup" : ".opencode/omo-coworkers-backup";
+}
+
+/** Dir that dir-pruning must stop at, relative to target (never removed). */
+function pruneStopRel(scope) {
+  return normalizeScope(scope) === "global" ? "." : ".opencode";
+}
+
+/** Kinds whose parent dirs may be pruned when empty. */
+function pruneKinds() {
+  return new Set(["skill", "plugin", "role-prompt"]);
+}
 
 export class ConflictError extends Error {
   constructor(report) {
@@ -43,17 +62,17 @@ function toAbs(target, rel) {
   return join(target, ...rel.split("/"));
 }
 
-function backupDirAbs(target, stamp) {
-  return join(target, ".opencode", "omo-coworkers-backup", stamp);
+function backupDirAbs(target, scope, stamp) {
+  return join(target, backupRootRel(scope), stamp);
 }
 
-function recordBackup(target, stamp, rel, abs) {
-  const dest = join(backupDirAbs(target, stamp), ...rel.split("/"));
+function recordBackup(target, scope, stamp, rel, abs) {
+  const dest = join(backupDirAbs(target, scope, stamp), ...rel.split("/"));
   mkdirSync(dirname(dest), { recursive: true });
   const bytes = readFileSync(abs);
   writeFileSync(dest, bytes);
   return {
-    backup: `.opencode/omo-coworkers-backup/${stamp}/${rel}`,
+    backup: `${backupRootRel(scope)}/${stamp}/${rel}`,
     sha256Before: sha256(bytes),
   };
 }
@@ -72,12 +91,14 @@ function readJsonIfExists(absPath) {
 export async function plan({
   packageRoot,
   target,
+  scope = "project",
   host,
   opencode,
   force = false,
   now = new Date().toISOString(),
 }) {
   target = resolve(target);
+  const global = normalizeScope(scope) === "global";
 
   let detection;
   if (host) {
@@ -120,13 +141,19 @@ export async function plan({
   }
 
   const overlay = JSON.parse(readFileSync(join(packageRoot, "oh-my-opencode-slim.json"), "utf8"));
-  const rendered = renderPlan({ packageRoot, host: detection.flavor, overlay });
+  const rendered = global
+    ? renderGlobalPlan({ packageRoot, overlay })
+    : renderPlan({ packageRoot, host: detection.flavor, overlay });
 
-  const existingManifest = manifestMod.readManifest(target);
+  const existingManifest = manifestMod.readManifest(target, scope);
   if (existingManifest && existingManifest.host.flavor !== detection.flavor) {
+    const where = global ? `config dir ${target}` : `target ${target}`;
+    const undo = global
+      ? `coworkers-install uninstall --global --config-dir ${target}`
+      : `coworkers-install uninstall --target ${target}`;
     throw new ConflictError([
-      `target ${target} holds a ${existingManifest.host.flavor} install (manifest ${MANIFEST_NAME}) but this run resolved host flavor ${detection.flavor}.`,
-      `Run \`coworkers-install uninstall --target ${target}\` first, then install for the new host.`,
+      `${where} holds a ${existingManifest.host.flavor} install (manifest ${MANIFEST_NAME}) but this run resolved host flavor ${detection.flavor}.`,
+      `Run \`${undo}\` first, then install for the new host.`,
     ]);
   }
 
@@ -149,8 +176,14 @@ export async function plan({
     if (exists) {
       const currentHash = sha256(readFileSync(abs));
       if (!managed) {
-        action = force ? "replace" : "conflict";
-        if (!force) report.push(`unmanaged file exists: ${file.path}`);
+        if (currentHash === file.sha256) {
+          // byte-identical to the payload: adopt it into the manifest with zero
+          // writes (uniform nicety for skills/overlay/prompt payloads)
+          action = "adopt";
+        } else {
+          action = force ? "replace" : "conflict";
+          if (!force) report.push(`unmanaged file exists: ${file.path}`);
+        }
       } else if (currentHash !== managed.sha256Installed) {
         action = force ? "replace" : "conflict";
         if (!force) report.push(`managed file changed since install: ${file.path} (run verify, reconcile, or pass --force)`);
@@ -161,50 +194,95 @@ export async function plan({
     entries.push({ ...file, action });
   }
 
-  // project overlay (.opencode/oh-my-opencode-slim.json)
+  // overlay
   const overlayRel = rendered.overlayProject;
   const overlayAbs = toAbs(target, overlayRel);
-  const jsoncAbs = toAbs(target, ".opencode/oh-my-opencode-slim.jsonc");
   const existingJson = readJsonIfExists(overlayAbs);
+  const notices = [];
   let overlayAction;
-  if (isSymlinkPath(overlayAbs)) {
-    report.push(
-      `symlink at managed path: ${overlayRel} — the installer never rewrites link boundaries; reconcile this path manually`,
-    );
-    overlayAction = "conflict";
-  } else if (existsSync(jsoncAbs)) {
-    // .jsonc wins over .json in the plugin's resolution order on both hosts;
-    // maintaining a shadowed .json would silently no-op
-    report.push(
-      `project oh-my-opencode-slim.jsonc exists; .jsonc wins over .json in the plugin's config resolution, so an additive .json install would be shadowed. Merge the shipped fragment into the .jsonc manually.`,
-    );
-    overlayAction = "conflict";
-  } else if (existingJson.exists && existingJson.error) {
-    report.push(`project overlay ${overlayRel} is not valid JSON: ${existingJson.error}`);
-    overlayAction = "conflict";
-  } else if (!existingJson.exists) {
-    overlayAction = "create";
-  } else {
-    const managesAny = MANAGED_AGENT_KEYS.some(
-      (k) => existingJson.value?.agents?.[k] !== undefined,
-    );
-    const managedByUs = existingManifest?.overlay?.path === overlayRel;
-    if (managesAny && !managedByUs) {
-      if (!force) {
-        report.push(
-          `overlay ${overlayRel} already defines ${MANAGED_AGENT_KEYS.filter((k) => existingJson.value?.agents?.[k] !== undefined).join(", ")} but is not managed by this installer's manifest; refusing to take over. Reconcile manually or pass --force (backs up and merges).`,
-        );
-      }
-      overlayAction = force ? "merge" : "conflict";
-    } else if (managedByUs) {
-      overlayAction = "remerge";
+  let preservedKeys = [];
+  if (global) {
+    if (isSymlinkPath(overlayAbs)) {
+      report.push(
+        `symlink at managed path: ${overlayRel} — the installer never rewrites link boundaries; reconcile this path manually`,
+      );
+      overlayAction = "conflict";
+    } else if (!existingJson.exists) {
+      overlayAction = "create";
+    } else if (existingJson.error) {
+      report.push(`user overlay ${overlayRel} is not valid JSON: ${existingJson.error}`);
+      overlayAction = "conflict";
     } else {
-      overlayAction = force || !managesAny ? "merge" : "conflict";
+      // Global rule: a user-level oh-my-opencode-slim.json that already defines
+      // either managed agent is owner-curated personal config. This installer
+      // NEVER modifies it (even with --force) — it is preserved untouched and
+      // recorded via manifest notices. Only a file WITHOUT both managed keys is
+      // merged into additively.
+      const overlayRec = existingManifest?.overlay;
+      const managedByUs = overlayRec?.path === overlayRel && overlayRec?.action !== "preserve";
+      const presentKeys = MANAGED_AGENT_KEYS.filter((k) => existingJson.value?.agents?.[k] !== undefined);
+      if (managedByUs) {
+        overlayAction = "remerge";
+      } else if (presentKeys.length > 0) {
+        overlayAction = "preserve";
+        preservedKeys = presentKeys;
+        notices.push(
+          `overlay ${overlayRel} already defines ${presentKeys.join(", ")}; the owner's existing entries were preserved untouched — this installer never modifies a user-level oh-my-opencode-slim.json that already manages these agents`,
+        );
+      } else {
+        overlayAction = "merge";
+      }
+      // idempotence: if merging would not change a single byte, mark unchanged
+      if (overlayAction === "merge" || overlayAction === "remerge") {
+        const mergedPreview = stringifyJson(mergeOverlay(existingJson.value, rendered.overlay));
+        if (readFileSync(overlayAbs, "utf8") === mergedPreview) overlayAction = "unchanged";
+      }
     }
-    // idempotence: if merging would not change a single byte, mark unchanged
-    if (overlayAction === "merge" || overlayAction === "remerge") {
-      const mergedPreview = stringifyJson(mergeOverlay(existingJson.value, rendered.overlay));
-      if (readFileSync(overlayAbs, "utf8") === mergedPreview) overlayAction = "unchanged";
+    notices.push(
+      "global mode never installs the claude-advisor plugin: user-level plugin auto-load requires an explicit `plugin` entry in your opencode.json (personal config, untouched by this installer); the plugin remains a project-scope payload",
+    );
+  } else {
+    // project overlay (.opencode/oh-my-opencode-slim.json)
+    const jsoncAbs = toAbs(target, ".opencode/oh-my-opencode-slim.jsonc");
+    if (isSymlinkPath(overlayAbs)) {
+      report.push(
+        `symlink at managed path: ${overlayRel} — the installer never rewrites link boundaries; reconcile this path manually`,
+      );
+      overlayAction = "conflict";
+    } else if (existsSync(jsoncAbs)) {
+      // .jsonc wins over .json in the plugin's resolution order on both hosts;
+      // maintaining a shadowed .json would silently no-op
+      report.push(
+        `project oh-my-opencode-slim.jsonc exists; .jsonc wins over .json in the plugin's config resolution, so an additive .json install would be shadowed. Merge the shipped fragment into the .jsonc manually.`,
+      );
+      overlayAction = "conflict";
+    } else if (existingJson.exists && existingJson.error) {
+      report.push(`project overlay ${overlayRel} is not valid JSON: ${existingJson.error}`);
+      overlayAction = "conflict";
+    } else if (!existingJson.exists) {
+      overlayAction = "create";
+    } else {
+      const managesAny = MANAGED_AGENT_KEYS.some(
+        (k) => existingJson.value?.agents?.[k] !== undefined,
+      );
+      const managedByUs = existingManifest?.overlay?.path === overlayRel;
+      if (managesAny && !managedByUs) {
+        if (!force) {
+          report.push(
+            `overlay ${overlayRel} already defines ${MANAGED_AGENT_KEYS.filter((k) => existingJson.value?.agents?.[k] !== undefined).join(", ")} but is not managed by this installer's manifest; refusing to take over. Reconcile manually or pass --force (backs up and merges).`,
+          );
+        }
+        overlayAction = force ? "merge" : "conflict";
+      } else if (managedByUs) {
+        overlayAction = "remerge";
+      } else {
+        overlayAction = force || !managesAny ? "merge" : "conflict";
+      }
+      // idempotence: if merging would not change a single byte, mark unchanged
+      if (overlayAction === "merge" || overlayAction === "remerge") {
+        const mergedPreview = stringifyJson(mergeOverlay(existingJson.value, rendered.overlay));
+        if (readFileSync(overlayAbs, "utf8") === mergedPreview) overlayAction = "unchanged";
+      }
     }
   }
 
@@ -212,16 +290,19 @@ export async function plan({
 
   return {
     target,
+    scope: normalizeScope(scope),
     packageRoot: resolve(packageRoot),
     host: detection,
     package: { name: PKG.name, version: PKG.version, baseline: BASELINE },
     rendered,
     entries,
+    notices,
     overlay: {
       path: overlayRel,
       action: overlayAction,
       existing: existingJson.exists ? existingJson.value : null,
-      managedByUs: existingManifest?.overlay?.path === overlayRel,
+      managedByUs: existingManifest?.overlay?.path === overlayRel && existingManifest?.overlay?.action !== "preserve",
+      preservedKeys,
     },
     existingManifest,
     stamp: now.replace(/[:.]/g, "-"),
@@ -231,6 +312,7 @@ export async function plan({
 /** Apply a plan: write files, merge overlay, write the manifest. */
 export function apply(planResult, { now = new Date().toISOString() } = {}) {
   const { target, rendered, packageRoot } = planResult;
+  const scope = planResult.scope ?? "project";
   const stamp = planResult.stamp;
   const files = [];
   const backups = [];
@@ -245,10 +327,16 @@ export function apply(planResult, { now = new Date().toISOString() } = {}) {
       files.push({ path: entry.path, action: "unchanged", kind: entry.kind, role: entry.role, skill: entry.skill, sha256Installed: entry.sha256, sha256Before: entry.sha256, backup: null });
       continue;
     }
+    if (entry.action === "adopt") {
+      // byte-identical payload already on disk: record it in the manifest and
+      // write nothing (drift checks still apply via sha256Installed)
+      files.push({ path: entry.path, action: "adopted", kind: entry.kind, role: entry.role, skill: entry.skill, sha256Installed: entry.sha256, sha256Before: entry.sha256, backup: null });
+      continue;
+    }
     let backup = null;
     let sha256Before = null;
     if (existsSync(abs) && entry.action !== "refresh") {
-      const rec = recordBackup(target, stamp, entry.path, abs);
+      const rec = recordBackup(target, scope, stamp, entry.path, abs);
       backup = rec.backup;
       sha256Before = rec.sha256Before;
       backups.push(rec.backup);
@@ -286,6 +374,16 @@ export function apply(planResult, { now = new Date().toISOString() } = {}) {
       backup: null,
       sha256Installed: sha256(readFileSync(overlayAbs)),
     };
+  } else if (planResult.overlay.action === "preserve") {
+    // owner-curated user-level overlay that already manages a co-worker agent:
+    // never modified by this installer (see plan()); surfaced via notices
+    overlayRecord = {
+      path: rendered.overlayProject,
+      action: "preserve",
+      preserved: planResult.overlay.preservedKeys ?? [],
+      managedKeys: [],
+      backup: null,
+    };
   } else if (planResult.overlay.action === "create") {
     const content = stringifyJson(shipped);
     atomicWriteFileSync(overlayAbs, content);
@@ -300,7 +398,7 @@ export function apply(planResult, { now = new Date().toISOString() } = {}) {
     let backup = null;
     let sha256Before = null;
     if (existsSync(overlayAbs)) {
-      const rec = recordBackup(target, stamp, rendered.overlayProject, overlayAbs);
+      const rec = recordBackup(target, scope, stamp, rendered.overlayProject, overlayAbs);
       backup = rec.backup;
       sha256Before = rec.sha256Before;
       backups.push(rec.backup);
@@ -323,15 +421,19 @@ export function apply(planResult, { now = new Date().toISOString() } = {}) {
     package: planResult.package,
     host: planResult.host,
     installedAt: now,
-    backupRoot: `.opencode/omo-coworkers-backup/${stamp}`,
+    scope,
+    backupRoot: `${backupRootRel(scope)}/${stamp}`,
     files,
     overlay: overlayRecord,
     promptAuthority: Object.fromEntries(
-      planResult.entries.filter((e) => e.kind === "role-agent").map((e) => [e.role, e.path]),
+      planResult.entries
+        .filter((e) => e.kind === "role-agent" || e.kind === "role-prompt")
+        .map((e) => [e.role, e.path]),
     ),
     skills: rendered.skillIds,
+    ...(planResult.notices && planResult.notices.length > 0 ? { notices: planResult.notices } : {}),
   };
-  manifestMod.writeManifest(target, manifest);
+  manifestMod.writeManifest(target, manifest, scope);
   return { manifest, backups };
 }
 
@@ -367,11 +469,11 @@ function removeEmptyDirsUp(target, relDir, stopRel) {
  * recorded hashes cannot be drift-checked; they proceed with an explicit
  * warning in `warnings`.
  */
-export function uninstall({ target }) {
+export function uninstall({ target, scope = "project" }) {
   target = resolve(target);
-  const manifest = manifestMod.readManifest(target);
+  const manifest = manifestMod.readManifest(target, scope);
   if (!manifest) {
-    const err = new Error(`no ${MANIFEST_NAME} under ${join(target, ".opencode")} — nothing to uninstall`);
+    const err = new Error(`no ${MANIFEST_NAME} at ${manifestMod.manifestPath(target, scope)} — nothing to uninstall`);
     err.code = 4;
     throw err;
   }
@@ -379,6 +481,8 @@ export function uninstall({ target }) {
   const kept = [];
   const restored = [];
   const warnings = [];
+  const stopRel = pruneStopRel(scope);
+  const prunable = pruneKinds();
 
   for (const file of manifest.files) {
     const abs = toAbs(target, file.path);
@@ -405,35 +509,38 @@ export function uninstall({ target }) {
       restored.push(file.path);
     } else {
       removed.push(file.path);
-      if (file.kind === "skill" || file.kind === "plugin") {
-        removeEmptyDirsUp(target, dirname(file.path).split("\\").join("/"), ".opencode");
+      if (prunable.has(file.kind)) {
+        removeEmptyDirsUp(target, dirname(file.path).split("\\").join("/"), stopRel);
       }
     }
   }
 
   const overlayPath = manifest.overlay?.path;
-  if (overlayPath) {
+  if (overlayPath && manifest.overlay.action !== "preserve") {
     const overlayAbs = toAbs(target, overlayPath);
     if (isSymlinkPath(overlayAbs)) {
       kept.push({ path: overlayPath, reason: "now a symlink; left for owner reconciliation" });
+    } else if (manifest.overlay.action === "create" && existsSync(overlayAbs)) {
+      // the installer created this file wholesale — remove it outright when its
+      // bytes still match what we wrote (no unmerge: a created overlay holds
+      // no owner content to preserve; rollback does the same)
+      if (manifest.overlay.sha256Installed === undefined) {
+        warnings.push(`${overlayPath}: manifest records no installed hash; drift could not be verified — deleting the created overlay anyway`);
+        rmSync(overlayAbs);
+        removed.push(overlayPath);
+      } else if (sha256(readFileSync(overlayAbs)) === manifest.overlay.sha256Installed) {
+        rmSync(overlayAbs);
+        removed.push(overlayPath);
+      } else {
+        kept.push({ path: overlayPath, reason: "changed after install; left for owner reconciliation" });
+      }
     } else if (existsSync(overlayAbs)) {
       const parsed = readJsonIfExists(overlayAbs);
       if (parsed.exists && !parsed.error) {
         const { next, removed: didRemove } = unmergeOverlay(parsed.value);
         if (didRemove) {
           if (next === null) {
-            if (manifest.overlay.action === "create") {
-              if (manifest.overlay.sha256Installed === undefined) {
-                warnings.push(`${overlayPath}: manifest records no installed hash; drift could not be verified — deleting the created overlay anyway`);
-                rmSync(overlayAbs);
-                removed.push(overlayPath);
-              } else if (sha256(readFileSync(overlayAbs)) === manifest.overlay.sha256Installed) {
-                rmSync(overlayAbs);
-                removed.push(overlayPath);
-              } else {
-                kept.push({ path: overlayPath, reason: "changed after install; left for owner reconciliation" });
-              }
-            } else if (manifest.overlay.backup && existsSync(toAbs(target, manifest.overlay.backup))) {
+            if (manifest.overlay.backup && existsSync(toAbs(target, manifest.overlay.backup))) {
               // restoring the pre-install backup replaces the whole file, so it
               // is drift-gated like any file backup: post-install owner edits
               // are kept and reported, never silently overwritten
@@ -461,16 +568,16 @@ export function uninstall({ target }) {
     }
   }
 
-  const result = { target, removed, restored, kept, warnings, host: manifest.host.flavor };
+  const result = { target, scope, removed, restored, kept, warnings, host: manifest.host.flavor };
   if (kept.length === 0) {
     if (manifest.backupRoot && existsSync(toAbs(target, manifest.backupRoot))) {
       rmSync(toAbs(target, manifest.backupRoot), { recursive: true, force: true });
     }
-    manifestMod.removeManifest(target);
+    manifestMod.removeManifest(target, scope);
     result.manifestRemoved = true;
   } else {
     manifest.lastUninstall = { at: new Date().toISOString(), kept };
-    manifestMod.writeManifest(target, manifest);
+    manifestMod.writeManifest(target, manifest, scope);
     result.manifestRemoved = false;
   }
   return result;
@@ -491,11 +598,11 @@ export function uninstall({ target }) {
  * Manifests without recorded hashes cannot be drift-checked; they proceed
  * with an explicit warning in `warnings`.
  */
-export function rollback({ target }) {
+export function rollback({ target, scope = "project" }) {
   target = resolve(target);
-  const manifest = manifestMod.readManifest(target);
+  const manifest = manifestMod.readManifest(target, scope);
   if (!manifest) {
-    const err = new Error(`no ${MANIFEST_NAME} under ${join(target, ".opencode")} — nothing to roll back`);
+    const err = new Error(`no ${MANIFEST_NAME} at ${manifestMod.manifestPath(target, scope)} — nothing to roll back`);
     err.code = 4;
     throw err;
   }
@@ -503,6 +610,8 @@ export function rollback({ target }) {
   const deleted = [];
   const blocked = [];
   const warnings = [];
+  const stopRel = pruneStopRel(scope);
+  const prunable = pruneKinds();
 
   for (const file of manifest.files) {
     const abs = toAbs(target, file.path);
@@ -537,13 +646,13 @@ export function rollback({ target }) {
     }
     rmSync(abs);
     deleted.push(file.path);
-    if (file.kind === "skill" || file.kind === "plugin") {
-      removeEmptyDirsUp(target, dirname(file.path).split("\\").join("/"), ".opencode");
+    if (prunable.has(file.kind)) {
+      removeEmptyDirsUp(target, dirname(file.path).split("\\").join("/"), stopRel);
     }
   }
 
   const overlayPath = manifest.overlay?.path;
-  if (overlayPath) {
+  if (overlayPath && manifest.overlay.action !== "preserve") {
     const overlayAbs = toAbs(target, overlayPath);
     const rec = manifest.overlay;
     const backupAbs = rec.backup ? toAbs(target, rec.backup) : null;
@@ -580,19 +689,19 @@ export function rollback({ target }) {
   }
 
   if (blocked.length === 0) {
-    const backupRootAbs = join(target, ".opencode", "omo-coworkers-backup");
+    const backupRootAbs = toAbs(target, backupRootRel(scope));
     if (existsSync(backupRootAbs)) rmSync(backupRootAbs, { recursive: true, force: true });
-    manifestMod.removeManifest(target);
+    manifestMod.removeManifest(target, scope);
   }
-  return { target, restored, deleted, blocked, warnings };
+  return { target, scope, restored, deleted, blocked, warnings };
 }
 
 /** Verify: manifest vs disk hashes. */
-export function verify({ target }) {
+export function verify({ target, scope = "project" }) {
   target = resolve(target);
-  const manifest = manifestMod.readManifest(target);
+  const manifest = manifestMod.readManifest(target, scope);
   if (!manifest) {
-    const err = new Error(`no ${MANIFEST_NAME} under ${join(target, ".opencode")}`);
+    const err = new Error(`no ${MANIFEST_NAME} at ${manifestMod.manifestPath(target, scope)}`);
     err.code = 4;
     throw err;
   }
@@ -608,5 +717,14 @@ export function verify({ target }) {
     if (sha256(readFileSync(abs)) !== file.sha256Installed) drift.push(file.path);
     else ok.push(file.path);
   }
-  return { target, host: manifest.host, ok, drift, missing, package: manifest.package };
+  return {
+    target,
+    scope,
+    host: manifest.host,
+    ok,
+    drift,
+    missing,
+    package: manifest.package,
+    notices: manifest.notices ?? [],
+  };
 }
